@@ -5,7 +5,7 @@
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | M0 | 脚手架、品牌改名、LICENSE、README、AGENTS/CONTRIBUTING | done |
-| M1 | provider adapter 接口 + registry + 账号模型 v2 + 加密改造 + 迁移器 + AStudio 迁移 + 统一目录 | doing |
+| M1 | provider adapter 接口 + registry + 账号模型 v2 + 加密改造 + 迁移器 + AStudio 迁移 + 统一目录 | done |
 | M2 | 网关跨提供商路由、Key 绑定提供商范围、`owned_by` | pending |
 | M3 | 四路账号接入：短信+GeeTest、粘贴、导入、OAuth 回调 + 降级粘贴 | pending |
 | M4 | Qoder adapter（登录 → 目录 → 对话 → 余额 → 签到 → 权益） | pending |
