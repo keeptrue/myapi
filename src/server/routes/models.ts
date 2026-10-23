@@ -8,7 +8,7 @@ import {
 import type { Services } from '../services.js'
 import { ProbeBusyError, ProbeInputError } from '../models/probe.js'
 import { compareCapabilities } from '../modelsdev/match.js'
-import { isRecord } from '../util.js'
+import { accountLabel, isRecord } from '../util.js'
 import { jsonError, requirePanel } from './helpers.js'
 
 function defaultEffort(model: ModelInfo): string {
@@ -27,7 +27,7 @@ function clampMaxTokens(value: unknown): number {
 function display(services: Services, model: ModelInfo) {
   const accountNames = model.availableAccountIds.flatMap(id => {
     const account = services.store.account(id)
-    return account === undefined ? [] : [account.nickname || account.name || account.accountId]
+    return account === undefined ? [] : [accountLabel(account)]
   })
   const pointMultipliers = (model.pointMultipliers ?? []).map(item => {
     const account = services.store.account(item.accountId)
@@ -35,7 +35,7 @@ function display(services: Services, model: ModelInfo) {
       accountId: item.accountId,
       accountName: account === undefined
         ? item.accountId
-        : (account.nickname || account.name || account.accountId),
+        : (accountLabel(account)),
       value: item.value,
     }
   })
@@ -46,9 +46,9 @@ function display(services: Services, model: ModelInfo) {
   return {
     ...model,
     hidden: services.store.hiddenModels.includes(model.slug),
-    probe: services.catalog.probeSummary(model.slug),
+    probe: services.astudioCatalog.probeSummary(model.slug),
     availableAccounts: accountNames,
-    aliases: services.catalog.aliasesFor(model.slug),
+    aliases: services.astudioCatalog.aliasesFor(model.slug),
     pointMultipliers,
     official,
     capabilities: compareCapabilities(model, official),
@@ -60,16 +60,16 @@ export function registerModelRoutes(app: FastifyInstance, services: Services): v
 
   app.get('/api/models', { preHandler: panel }, async () => {
     return {
-      source: services.catalog.current.source,
-      fetchedAt: services.catalog.current.fetchedAt,
-      error: services.catalog.current.error,
+      source: services.astudioCatalog.current.source,
+      fetchedAt: services.astudioCatalog.current.fetchedAt,
+      error: services.astudioCatalog.current.error,
       modelsDev: services.modelsDev.status(),
-      models: services.catalog.models.map(model => display(services, model)),
+      models: services.astudioCatalog.models.map(model => display(services, model)),
     }
   })
 
   app.post('/api/models/refresh', { preHandler: panel }, async () => {
-    const snapshot = await services.catalog.refresh()
+    const snapshot = await services.astudioCatalog.refresh()
     return {
       source: snapshot.source,
       fetchedAt: snapshot.fetchedAt,
@@ -85,14 +85,14 @@ export function registerModelRoutes(app: FastifyInstance, services: Services): v
     if (typeof body !== 'object' || body === null) return jsonError(reply, 400, '请求体必须是 JSON 对象')
     const visible = (body as Record<string, unknown>)['visible']
     if (typeof visible !== 'boolean') return jsonError(reply, 400, 'visible 必须是布尔值')
-    if (services.catalog.resolve(slug) === undefined) return jsonError(reply, 404, '模型不存在', 'not_found')
+    if (services.astudioCatalog.resolve(slug) === undefined) return jsonError(reply, 404, '模型不存在', 'not_found')
     services.store.setModelHidden(slug, !visible)
     return { ok: true, hidden: services.store.hiddenModels }
   })
 
   app.post('/api/models/:slug/probe', { preHandler: panel }, async (request, reply) => {
     const { slug } = request.params as { slug: string }
-    const model = services.catalog.resolve(slug)
+    const model = services.astudioCatalog.resolve(slug)
     if (model === undefined) return jsonError(reply, 404, '模型不存在', 'not_found')
     const body = isRecord(request.body) ? request.body : {}
 
@@ -149,7 +149,7 @@ export function registerModelRoutes(app: FastifyInstance, services: Services): v
         allAccounts,
         image,
       })
-      return { results, probe: services.catalog.probeSummary(model.slug) }
+      return { results, probe: services.astudioCatalog.probeSummary(model.slug) }
     } catch (error: unknown) {
       if (error instanceof ProbeBusyError) return jsonError(reply, 409, error.message, 'probe_in_progress')
       if (error instanceof ProbeInputError) return jsonError(reply, 400, error.message, 'probe_invalid')
@@ -159,7 +159,7 @@ export function registerModelRoutes(app: FastifyInstance, services: Services): v
 
   app.put('/api/models/:slug/reference', { preHandler: panel }, async (request, reply) => {
     const { slug } = request.params as { slug: string }
-    const model = services.catalog.resolve(slug)
+    const model = services.astudioCatalog.resolve(slug)
     if (model === undefined) return jsonError(reply, 404, '模型不存在', 'not_found')
     const body = request.body
     if (!isRecord(body)) return jsonError(reply, 400, '请求体必须是 JSON 对象')
@@ -209,7 +209,7 @@ export function registerModelRoutes(app: FastifyInstance, services: Services): v
     const cleaned: Record<string, string> = {}
     for (const [alias, target] of Object.entries(aliases)) {
       if (typeof target !== 'string' || target.trim() === '') continue
-      if (services.catalog.resolve(target) === undefined) {
+      if (services.astudioCatalog.resolve(target) === undefined) {
         return jsonError(reply, 400, `别名 ${alias} 指向的模型不存在：${target}`)
       }
       cleaned[alias.trim()] = target.trim()

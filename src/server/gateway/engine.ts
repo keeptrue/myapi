@@ -1,19 +1,16 @@
 import type { Counter, LogEntry } from '../../shared/types.js'
 import type { StoredAccount, StoredApiKey } from '../store/schema.js'
 import type { StateStore } from '../store/state.js'
-import type { AstronApi, AstronSession } from '../astron/types.js'
-import type { AccountService } from '../astron/accounts.js'
-import { isSessionExpired } from '../astron/types.js'
-import { truncate } from '../util.js'
+import type { ProviderRegistry } from '../providers/registry.js'
+import type { AdapterContext } from '../providers/types.js'
+import { upstreamConfigFromSettings } from '../config.js'
 import { AccountSelector, GatewayError } from './select.js'
-import type { CatalogService } from '../astron/catalog.js'
 import { logger as rootLogger } from '../logger.js'
+import { truncate } from '../util.js'
 
 export interface EngineDeps {
   store: StateStore
-  client: AstronApi
-  accounts: AccountService
-  catalog: CatalogService
+  registry: ProviderRegistry
   selector: AccountSelector
 }
 
@@ -31,7 +28,7 @@ export interface CallRequest {
 export interface CallResult {
   response: Response
   account: StoredAccount
-  session: AstronSession
+  providerId: string
   controller: AbortController
 }
 
@@ -46,11 +43,21 @@ export async function readTextLimited(response: Response, limit = READ_ERROR_LIM
   }
 }
 
-/** Forwards one request to an account, retrying across accounts before any bytes reach the client. */
+/**
+ * Forwards one request to an account, retrying across accounts before any bytes reach the client.
+ *
+ * The engine knows nothing about any vendor: it picks an account through the selector, then hands
+ * the wire format to that account's adapter. 401 renewal, 429/5xx failover and cooldown bookkeeping
+ * are all provider-agnostic.
+ */
 export class GatewayEngine {
   private readonly log = rootLogger.child({ module: 'gateway' })
 
   constructor(private readonly deps: EngineDeps) {}
+
+  private context(signal: AbortSignal): AdapterContext {
+    return { config: upstreamConfigFromSettings(this.deps.store.settings), signal }
+  }
 
   async call(request: CallRequest): Promise<CallResult> {
     const skip = new Set<string>()
@@ -70,18 +77,7 @@ export class GatewayEngine {
         throw error
       }
 
-      let session = this.deps.accounts.sessionFor(account)
-      if (session.modelBearerToken === '') {
-        try {
-          account = await this.deps.accounts.refreshCredential(account.id)
-          session = this.deps.accounts.sessionFor(account)
-        } catch (error: unknown) {
-          lastError = error instanceof Error ? error.message : String(error)
-          skip.add(account.id)
-          continue
-        }
-      }
-
+      const adapter = this.deps.registry.require(account.providerId)
       const controller = new AbortController()
       const onAbort = (): void => controller.abort()
       if (request.signal.aborted) controller.abort()
@@ -89,12 +85,15 @@ export class GatewayEngine {
 
       let response: Response
       try {
-        response = await this.deps.client.inference(request.path, session, request.body, controller.signal)
+        response = await adapter.inference(
+          { account, path: request.path, model: request.upstreamModel, body: request.body, signal: controller.signal },
+          this.context(controller.signal),
+        )
       } catch (error: unknown) {
         request.signal.removeEventListener('abort', onAbort)
         if (request.signal.aborted) throw error
         lastError = error instanceof Error ? error.message : String(error)
-        this.deps.accounts.markFailed(account.id, lastError, 20)
+        this.deps.store.markFailed(account.id, lastError, 20)
         skip.add(account.id)
         continue
       }
@@ -102,20 +101,23 @@ export class GatewayEngine {
       if (response.status === 401) {
         const text = await readTextLimited(response)
         try {
-          account = await this.deps.accounts.refreshCredential(account.id)
-          session = this.deps.accounts.sessionFor(account)
-          const retry = await this.deps.client.inference(request.path, session, request.body, controller.signal)
+          await adapter.refreshCredential(account, this.context(controller.signal))
+          // Renewal persists through the store, so re-read before replaying the request.
+          const refreshed = this.deps.store.account(account.id)
+          if (refreshed !== undefined) account = refreshed
+          const retry = await adapter.inference(
+            { account, path: request.path, model: request.upstreamModel, body: request.body, signal: controller.signal },
+            this.context(controller.signal),
+          )
           if (retry.ok) {
-            this.deps.accounts.markUsed(account.id)
-            return { response: retry, account, session, controller }
+            this.deps.store.markUsed(account.id)
+            return { response: retry, account, providerId: account.providerId, controller }
           }
           lastError = `HTTP 401 after credential refresh: ${truncate(text, 200)}`
         } catch (error: unknown) {
-          lastError = isSessionExpired(error)
-            ? '会话已失效，重新登录后再试'
-            : `${truncate(text, 200)}${text === '' ? '' : ' · '}${error instanceof Error ? error.message : String(error)}`
+          lastError = `${truncate(text, 200)}${text === '' ? '' : ' · '}${error instanceof Error ? error.message : String(error)}`
         }
-        this.deps.accounts.markFailed(account.id, lastError, 60)
+        this.deps.store.markFailed(account.id, lastError, 60)
         skip.add(account.id)
         request.signal.removeEventListener('abort', onAbort)
         continue
@@ -124,14 +126,14 @@ export class GatewayEngine {
       if (response.status === 429 || response.status >= 500) {
         const text = await readTextLimited(response)
         lastError = `HTTP ${response.status}: ${truncate(text, 300)}`
-        this.deps.accounts.markFailed(account.id, lastError, 20)
+        this.deps.store.markFailed(account.id, lastError, 20)
         skip.add(account.id)
         request.signal.removeEventListener('abort', onAbort)
         continue
       }
 
-      if (response.ok) this.deps.accounts.markUsed(account.id)
-      return { response, account, session, controller }
+      if (response.ok) this.deps.store.markUsed(account.id)
+      return { response, account, providerId: account.providerId, controller }
     }
     throw new GatewayError(503, 'upstream_unavailable', `上游请求失败：${lastError || '没有可用账号'}`)
   }
@@ -141,6 +143,8 @@ export function makeLogEntry(input: {
   requestId: string
   key: Pick<StoredApiKey, 'id' | 'prefix'>
   account: StoredAccount | undefined
+  providerId: string
+  accountLabel: string
   model: string
   upstreamModel: string
   stream: boolean
@@ -158,7 +162,8 @@ export function makeLogEntry(input: {
     keyId: input.key.id,
     keyPrefix: input.key.prefix,
     accountId: input.account?.id ?? '',
-    accountName: input.account === undefined ? '' : (input.account.nickname || input.account.name || input.account.accountId),
+    accountName: input.accountLabel,
+    providerId: input.providerId,
     stream: input.stream,
     status: input.status,
     promptTokens: input.usage?.prompt ?? 0,

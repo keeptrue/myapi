@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { Services } from '../services.js'
+import { accountLabel, numberField } from '../util.js'
 import { jsonError, requirePanel } from './helpers.js'
 
 function rangeOf(value: unknown): string {
@@ -28,7 +29,7 @@ export function registerUsageRoutes(app: FastifyInstance, services: Services): v
     return {
       byAccount: summary.byAccount.map(item => {
         const account = services.store.account(item.key)
-        return { ...item, name: account?.nickname || account?.name || item.key }
+        return { ...item, name: account === undefined ? item.key : accountLabel(account) }
       }),
     }
   })
@@ -90,10 +91,10 @@ export function registerUsageRoutes(app: FastifyInstance, services: Services): v
     return {
       accounts: accounts.length,
       enabledAccounts: accounts.filter(account => account.enabled).length,
-      generalPoints: accounts.reduce((sum, account) => sum + account.pointsBalance, 0),
-      sparkPoints: accounts.reduce((sum, account) => sum + account.sparkBalance, 0),
-      pendingPopups: accounts.reduce((sum, account) => sum + account.pendingPopups, 0),
-      activePlans: accounts.filter(account => account.planActive).length,
+      generalPoints: accounts.reduce((sum, account) => sum + numberField(account.profile['pointsBalance']), 0),
+      sparkPoints: accounts.reduce((sum, account) => sum + numberField(account.profile['sparkBalance']), 0),
+      pendingPopups: accounts.reduce((sum, account) => sum + numberField(account.profile['pendingPopups']), 0),
+      activePlans: accounts.filter(account => numberField(account.profile['planActive']) > 0).length,
       lastCheckinDay: services.store.scheduler.lastCheckinDay ?? '',
     }
   })
@@ -117,7 +118,7 @@ export function registerUsageRoutes(app: FastifyInstance, services: Services): v
       }
     }
     const results = []
-    for (const account of services.store.accounts.filter(item => item.enabled && item.tokenEnc !== undefined)) {
+    for (const account of services.store.accounts.filter(item => item.enabled && item.credentialsEnc !== undefined)) {
       results.push(await services.accounts.checkin(account.id))
     }
     return { results }

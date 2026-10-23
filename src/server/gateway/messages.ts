@@ -7,7 +7,7 @@ import { readTextLimited, usageFrom } from './engine.js'
 import { GatewayError } from './select.js'
 import { SseDecoder, sseFrame } from './sse.js'
 import { anthropicError, toAnthropicMessage, toChatBody } from './messages-convert.js'
-import { truncate } from '../util.js'
+import { accountLabel, truncate } from '../util.js'
 
 export interface MessagesInput {
   key: StoredApiKey
@@ -267,7 +267,8 @@ export class AnthropicGateway {
       keyId: input.key.id,
       keyPrefix: input.key.prefix,
       accountId: account.id,
-      accountName: account.nickname || account.name || account.accountId,
+      accountName: accountLabel(account),
+      providerId: account.providerId,
       stream: true,
       status,
       promptTokens: usage?.prompt ?? 0,
@@ -289,7 +290,8 @@ export class AnthropicGateway {
       keyId: input.key.id,
       keyPrefix: input.key.prefix,
       accountId: account.id,
-      accountName: account.nickname || account.name || account.accountId,
+      accountName: accountLabel(account),
+      providerId: account.providerId,
       stream,
       status,
       promptTokens: usage?.prompt ?? 0,

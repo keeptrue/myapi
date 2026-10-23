@@ -3,7 +3,7 @@ import { APP_NAME, APP_VERSION } from '../shared/constants.js'
 import { buildApp } from './app.js'
 import { loadConfig } from './config.js'
 import { logger } from './logger.js'
-import { createServices } from './services.js'
+import { createServices, refreshUnifiedCatalog } from './services.js'
 
 /** Shutdown hook returned by a startup step (dev mounts Vite this way). */
 export type Cleanup = () => void | Promise<void>
@@ -80,7 +80,7 @@ export async function startServer(options: StartOptions = {}): Promise<void> {
   console.log('')
 
   services.scheduler.start()
-  void services.catalog.refresh().catch(error => logger.warn('catalog refresh failed', error))
+  void refreshUnifiedCatalog(services).catch(error => logger.warn('catalog refresh failed', error))
 
   let closing = false
   const shutdown = async (signal: string): Promise<void> => {

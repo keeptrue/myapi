@@ -1,5 +1,5 @@
 import { logger as rootLogger } from './logger.js'
-import { localDayKey } from './util.js'
+import { accountLabel, localDayKey } from './util.js'
 import type { Services } from './services.js'
 
 const TICK_MS = 60_000
@@ -33,11 +33,11 @@ export class Scheduler {
     try {
       const settings = this.services.store.settings
       const now = Date.now()
-      const catalogAge = now - this.services.catalog.current.fetchedAt
-      if (this.services.catalog.current.fetchedAt === 0 || catalogAge >= settings.catalogRefreshMinutes * 60_000) {
+      const catalogAge = now - this.services.astudioCatalog.current.fetchedAt
+      if (this.services.astudioCatalog.current.fetchedAt === 0 || catalogAge >= settings.catalogRefreshMinutes * 60_000) {
         if (!this.cataloging) {
           this.cataloging = true
-          void this.services.catalog.refresh()
+          void this.services.astudioCatalog.refresh()
             .catch(error => this.log.warn('catalog refresh failed', error))
             .finally(() => { this.cataloging = false })
         }
@@ -71,11 +71,15 @@ export class Scheduler {
   }
 
   async checkinAll(): Promise<void> {
-    const accounts = this.services.store.accounts.filter(account => account.enabled && account.tokenEnc !== undefined)
+    const accounts = this.services.store.accounts.filter(account => account.enabled && account.credentialsEnc !== undefined)
     for (const account of accounts) {
       try {
         const result = await this.services.accounts.checkin(account.id)
-        this.log.info('check-in finished', { account: account.name, delta: result.pointsDelta, error: result.error })
+        this.log.info('check-in finished', {
+        account: accountLabel(account),
+        delta: result.deltas.map(item => `${item.key}:${item.value}`).join(','),
+        error: result.error,
+      })
       } catch (error: unknown) {
         this.log.warn('check-in failed', error)
       }
@@ -88,7 +92,7 @@ export class Scheduler {
       try {
         await this.services.accounts.keepalive(account.id)
       } catch (error: unknown) {
-        this.log.warn('keepalive failed', { account: account.name, error: error instanceof Error ? error.message : String(error) })
+        this.log.warn('keepalive failed', { account: accountLabel(account), error: error instanceof Error ? error.message : String(error) })
       }
     }
     this.services.store.setScheduler({ lastKeepaliveAt: Date.now() })

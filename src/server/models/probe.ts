@@ -13,13 +13,13 @@ import type {
   ProbeUsage,
   ProbeValidation,
 } from '../../shared/types.js'
-import type { AccountService } from '../astron/accounts.js'
-import { AstronError, type AstronApi, type AstronSession } from '../astron/types.js'
+import type { AccountService } from '../providers/astudio/accounts.js'
+import { AstronError, type AstronApi, type AstronSession } from '../providers/astudio/types.js'
 import type { StoredAccount } from '../store/schema.js'
 import type { StateStore } from '../store/state.js'
 import { logger as rootLogger } from '../logger.js'
 import { readLimited } from '../http.js'
-import { isRecord, numberField, stringField, truncate } from '../util.js'
+import { accountLabel, isRecord, numberField, stringField, truncate } from '../util.js'
 
 /** A small red square used to verify image input without fetching an external URL. */
 export const PROBE_IMAGE_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAABOUlEQVR42tXUSxKDIBAEUO2D6CL3v1Gy8CRmlaokIiLMp5udMtNVT2Hmfd+nz3qt66S28P3w2DZtgKIBx1daBhTPvZABZ3dXxYDK/JEwoD5D+Q0/l1jR8D+F5AyFMaplQPGtkAFnGyoGVPYkDKhv8xtwWUFuQEsRswGNdbQGtJdyGnCrmtCAuw1sBnT0UBnQ18ZjQHcniQEjzQwGDPanGzAekWuASUqiAVZBWQYYZqUYYBsXb4B5YrABHqGRBjh9mDAD/E5njAGuIyLA4AsIMLgDvA0RAFdDEMDPEAdwMoQCPAzRAHNDAsDWkAMwNKQBrAyZABNDMmDckA8YNFAARgwsgG4DEaDPwAXoMNAB7hoYAbcMpIB2Ay+g0UANaDGwAy4NAoC6YX4uyySyxKZQ439QAhQNYoCj4Q2fLLiUFujz3gAAAABJRU5ErkJggg=='
@@ -189,7 +189,7 @@ function isAbort(error: unknown): boolean {
 }
 
 function accountName(account: StoredAccount): string {
-  return account.nickname || account.name || account.accountId || account.id
+  return accountLabel(account)
 }
 
 export class ProbeService {
@@ -219,7 +219,7 @@ export class ProbeService {
   private selectAccounts(input: ProbeInput): StoredAccount[] {
     const eligible = this.deps.store.accounts.filter(account =>
       account.enabled
-      && (account.modelBearerEnc !== undefined || account.tokenEnc !== undefined || account.ssoSessionEnc !== undefined))
+      && account.credentialsEnc !== undefined)
     if (input.accountId !== undefined && input.accountId !== '') {
       const account = eligible.find(item => item.id === input.accountId)
       if (account === undefined) throw new ProbeInputError('该账号受限或未配置凭据')

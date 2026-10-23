@@ -1,7 +1,8 @@
 import type { StoredAccount, StoredApiKey } from '../store/schema.js'
 import type { StateStore } from '../store/state.js'
-import type { AccountService } from '../astron/accounts.js'
-import type { CatalogService } from '../astron/catalog.js'
+import { upstreamConfigFromSettings } from '../config.js'
+import type { ProviderRegistry } from '../providers/registry.js'
+import type { UnifiedCatalog } from '../providers/catalog.js'
 
 export class GatewayError extends Error {
   constructor(
@@ -21,46 +22,67 @@ export interface PickOptions {
   allowCooling?: boolean
 }
 
-/** Selects an upstream account for one request. */
+/**
+ * Selects an upstream account for one request.
+ *
+ * Rotation is provider-agnostic: it only looks at the shell fields of `StoredAccount`
+ * (enabled, cooldown, credential presence) and asks the registry for anything vendor-shaped,
+ * such as whether a credential needs renewing or whether an account still has quota.
+ */
 export class AccountSelector {
   private cursor = 0
 
   constructor(
     private readonly store: StateStore,
-    private readonly accounts: AccountService,
-    private readonly catalog: CatalogService,
+    private readonly registry: ProviderRegistry,
+    private readonly catalog: UnifiedCatalog,
   ) {}
+
+  private adapter(account: StoredAccount) {
+    return this.registry.require(account.providerId)
+  }
 
   private usable(account: StoredAccount, options: PickOptions, now: number): boolean {
     if (!account.enabled) return false
     if (!options.allowCooling && account.cooldownUntil > now) return false
     if (options.skip?.has(account.id) === true) return false
     if (options.key.boundAccountId !== null && account.id !== options.key.boundAccountId) return false
-    if (account.tokenEnc === undefined && account.modelBearerEnc === undefined) return false
-    if (options.model !== undefined && options.key.allowedModels.length > 0) {
-      const model = this.catalog.resolve(options.model)
-      const names = new Set([options.model.toLowerCase(), model?.slug.toLowerCase(), model?.name.toLowerCase()])
-      if (!options.key.allowedModels.some(allowed => names.has(allowed.toLowerCase()))) return false
-    }
+    // The key's provider scope is the first filter: a key scoped to one provider must never
+    // route through another provider's accounts.
+    if (
+      options.key.allowedProviders.length > 0
+      && !options.key.allowedProviders.includes(account.providerId)
+    ) return false
+    if (account.credentialsEnc === undefined) return false
     return true
   }
 
+  /**
+   * Whether the account still has usable quota. The decision belongs to the adapter that owns
+   * the vendor's numbers; an unknown provider never blocks rotation.
+   */
   private hasBalance(account: StoredAccount): boolean {
-    return !account.pointsKnown || account.pointsBalance > 0 || account.sparkBalance > 0
+    try {
+      return this.adapter(account).hasUsableBalance(account)
+    } catch {
+      return true
+    }
   }
 
   private modelAvailable(account: StoredAccount, model: string | undefined): boolean {
     if (model === undefined) return true
-    const info = this.catalog.resolve(model)
-    if (info === undefined || info.availableAccountIds.length === 0) return true
-    return info.availableAccountIds.includes(account.id)
+    const merged = this.catalog.resolve(model)
+    if (merged === undefined || merged.providers.length === 0) return true
+    return merged.providers.some(
+      record => record.providerId === account.providerId && record.available,
+    )
   }
 
   async pick(options: PickOptions): Promise<StoredAccount> {
     const now = Date.now()
     const total = this.store.accounts.length
     if (total === 0) {
-      throw new GatewayError(503, 'no_upstream_account', '没有可用账号，请先在控制台添加 AStudio 账号')
+      throw new GatewayError(503, 'no_upstream_account', '没有可用账号，请先在控制台添加账号')
     }
     const start = this.cursor++
     const ordered: StoredAccount[] = []
@@ -80,9 +102,10 @@ export class AccountSelector {
     for (const requireBalance of passes) {
       for (const account of [...preferred, ...fallback]) {
         if (requireBalance && !this.hasBalance(account)) continue
-        if (account.modelBearerEnc === undefined) {
+        const adapter = this.adapter(account)
+        if (adapter.needsCredentialRefresh?.(account) === true) {
           try {
-            await this.accounts.refreshCredential(account.id)
+            await adapter.refreshCredential(account, { config: upstreamConfigFromSettings(this.store.settings) })
           } catch {
             continue
           }

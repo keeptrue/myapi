@@ -5,7 +5,7 @@ import { readTextLimited, usageFrom } from './engine.js'
 import { relayResponsesStream, type RelayMeta } from './relay.js'
 import { GatewayError } from './select.js'
 import type { UsageService } from './usage.js'
-import { truncate } from '../util.js'
+import { accountLabel, truncate } from '../util.js'
 
 export interface ResponsesInput {
   key: StoredApiKey
@@ -95,7 +95,8 @@ export class ResponsesGateway {
       keyId: input.key.id,
       keyPrefix: input.key.prefix,
       accountId: account.id,
-      accountName: account.nickname || account.name || account.accountId,
+      accountName: accountLabel(account),
+      providerId: account.providerId,
       stream,
       status,
       promptTokens: usage?.prompt ?? 0,

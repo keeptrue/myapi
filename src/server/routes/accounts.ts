@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify'
-import type { CheckinResult, ImportAccountInput, ImportFileInput } from '../../shared/types.js'
+import type { CheckinResult } from '../../shared/providers.js'
 import type { StoredAccount } from '../store/schema.js'
 import type { Services } from '../services.js'
+import type { LegacyImportFileInput, LegacyPasteInput } from '../providers/astudio/accounts.js'
 import { jsonError, requirePanel } from './helpers.js'
 
 function pickModel(services: Services): string | undefined {
-  const visible = services.catalog.visibleModels()
+  const visible = services.astudioCatalog.visibleModels()
   return (visible.find(model => model.available) ?? visible[0])?.slug
 }
 
@@ -20,7 +21,7 @@ export function registerAccountRoutes(app: FastifyInstance, services: Services):
     const body = request.body
     if (typeof body !== 'object' || body === null) return jsonError(reply, 400, '请求体必须是 JSON 对象')
     try {
-      const account = await services.accounts.importPaste(body as ImportAccountInput)
+      const account = await services.accounts.importPaste(body as LegacyPasteInput)
       return { account: services.accounts.toPublic(account) }
     } catch (error: unknown) {
       return jsonError(reply, 400, error instanceof Error ? error.message : String(error))
@@ -31,7 +32,7 @@ export function registerAccountRoutes(app: FastifyInstance, services: Services):
     const body = request.body
     if (typeof body !== 'object' || body === null) return jsonError(reply, 400, '请求体必须是 JSON 对象')
     try {
-      const account = await services.accounts.importFile(body as ImportFileInput)
+      const account = await services.accounts.importFile(body as LegacyImportFileInput)
       return { account: services.accounts.toPublic(account) }
     } catch (error: unknown) {
       return jsonError(reply, 400, error instanceof Error ? error.message : String(error))
@@ -43,12 +44,19 @@ export function registerAccountRoutes(app: FastifyInstance, services: Services):
     const body = request.body
     if (typeof body !== 'object' || body === null) return jsonError(reply, 400, '请求体必须是 JSON 对象')
     const record = body as Record<string, unknown>
-    const patch: Partial<StoredAccount> = {}
-    if (typeof record['name'] === 'string' && record['name'].trim() !== '') patch['name'] = record['name'].trim()
-    if (typeof record['domainAccount'] === 'string') patch['domainAccount'] = record['domainAccount'].trim()
-    if (typeof record['enabled'] === 'boolean') patch['enabled'] = record['enabled']
-    const updated = services.store.updateAccount(id, patch)
+    const name = typeof record['name'] === 'string' ? record['name'].trim() : ''
+    const domainAccount = typeof record['domainAccount'] === 'string' ? record['domainAccount'].trim() : undefined
+    const enabled = typeof record['enabled'] === 'boolean' ? record['enabled'] : undefined
+    const updated = services.store.updateAccount(id, {
+      ...(name !== '' ? { label: name } : {}),
+      ...(enabled === undefined ? {} : { enabled }),
+    })
     if (updated === undefined) return jsonError(reply, 404, '账号不存在', 'not_found')
+    // domainAccount is adapter-owned state, so it lives in `profile` rather than the shell.
+    if (domainAccount !== undefined) {
+      const withProfile = services.store.updateProfile(id, { domainAccount })
+      if (withProfile !== undefined) return { account: services.accounts.toPublic(withProfile) }
+    }
     return { account: services.accounts.toPublic(updated) }
   })
 
@@ -92,7 +100,7 @@ export function registerAccountRoutes(app: FastifyInstance, services: Services):
 
   app.post('/api/accounts/checkin-all', { preHandler: panel }, async () => {
     const results: CheckinResult[] = []
-    for (const account of services.store.accounts.filter(item => item.enabled && item.tokenEnc !== undefined)) {
+    for (const account of services.store.accounts.filter(item => item.enabled && item.credentialsEnc !== undefined)) {
       results.push(await services.accounts.checkin(account.id))
     }
     return { results }

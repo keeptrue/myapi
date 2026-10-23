@@ -31,6 +31,7 @@ export function registerKeyRoutes(app: FastifyInstance, services: Services): voi
     const created = services.auth.createApiKey({
       name: typeof record['name'] === 'string' ? record['name'] : '默认密钥',
       allowedModels: stringList(record['allowedModels']),
+      allowedProviders: stringList(record['allowedProviders']),
       boundAccountId: bound,
       rpm: parsePositiveInt(record['rpm'], 0, 0, 6000),
     })

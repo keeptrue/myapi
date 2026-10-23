@@ -2,6 +2,25 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+import type { StoredAccount } from './store/schema.js'
+
+/**
+ * Provider-agnostic display label for an account.
+ *
+ * Prefers the user-set 备注名, then the vendor's nickname, then its vendor account id, then the
+ * internal id. Nothing here knows which provider the account belongs to, so the same helper
+ * works for every adapter.
+ */
+export function accountLabel(account: StoredAccount): string {
+  const label = account.label.trim()
+  if (label !== '') return label
+  const profile = account.profile ?? {}
+  const nickname = stringField(profile['nickname'])
+  if (nickname !== '') return nickname
+  const accountId = stringField(profile['accountId'])
+  return accountId !== '' ? accountId : account.id
+}
+
 export function stringField(value: unknown): string {
   if (typeof value === 'string') return value.trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)

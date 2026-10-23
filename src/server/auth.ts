@@ -94,7 +94,7 @@ export class AuthService {
     return { ok: true, key }
   }
 
-  createApiKey(input: { name: string; allowedModels: string[]; boundAccountId: string | null; rpm: number }): { key: string; record: StoredApiKey } {
+  createApiKey(input: { name: string; allowedModels: string[]; allowedProviders: string[]; boundAccountId: string | null; rpm: number }): { key: string; record: StoredApiKey } {
     const generated = generateApiKey(this.masterKey)
     const now = Date.now()
     const record: StoredApiKey = {
@@ -105,6 +105,7 @@ export class AuthService {
       keyHmac: generated.keyHmac,
       enabled: true,
       allowedModels: input.allowedModels,
+      allowedProviders: input.allowedProviders,
       boundAccountId: input.boundAccountId,
       rpm: input.rpm,
       createdAt: now,

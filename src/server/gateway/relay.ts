@@ -3,7 +3,7 @@ import type { LogEntry } from '../../shared/types.js'
 import type { StoredAccount, StoredApiKey } from '../store/schema.js'
 import { SseDecoder, sseFrame } from './sse.js'
 import { usageFrom, type CallResult, type UsageShape } from './engine.js'
-import { truncate } from '../util.js'
+import { accountLabel, truncate } from '../util.js'
 
 export interface RelayMeta {
   requestId: string
@@ -31,7 +31,8 @@ function logOf(meta: RelayMeta, input: {
     keyId: meta.key.id,
     keyPrefix: meta.key.prefix,
     accountId: account?.id ?? '',
-    accountName: account === undefined ? '' : (account.nickname || account.name || account.accountId),
+    accountName: account === undefined ? '' : accountLabel(account),
+    providerId: account?.providerId ?? '',
     stream: true,
     status: input.status,
     promptTokens: input.usage?.prompt ?? 0,

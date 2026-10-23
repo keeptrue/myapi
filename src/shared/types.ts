@@ -1,5 +1,12 @@
 /** Types shared by the API server and the React console. */
 
+import type {
+  AccountProfilePublic,
+  AccountTestResult,
+  CredentialKind,
+  ProviderCapabilities,
+} from './providers.js'
+
 export interface SecretBox {
   v: 1
   iv: string
@@ -7,17 +14,12 @@ export interface SecretBox {
   ct: string
 }
 
-export type AccountSource = 'sms-login' | 'paste' | 'file-import' | 'model-only'
-
 export interface AccountPublic {
   id: string
-  name: string
-  accountId: string
-  uid: string
-  mobileMasked: string
-  nickname: string
-  domainAccount: string
-  source: AccountSource
+  providerId: string
+  providerName: string
+  label: string
+  credentialKind: CredentialKind
   enabled: boolean
   sessionOk: boolean
   statusNote: string
@@ -26,21 +28,12 @@ export interface AccountPublic {
   cooldownUntil: number
   successes: number
   failures: number
-  pointsKnown: boolean
-  pointsBalance: number
-  sparkBalance: number
-  planCode: string
-  planName: string
-  planActive: boolean
-  pendingPopups: number
-  lastCheckedAt: number
-  lastClaimAt: number
   createdAt: number
   updatedAt: number
-  credentials: {
-    cookie: boolean
-    modelBearer: boolean
-  }
+  /** Capability bits, so the console can hide actions a provider cannot perform. */
+  capabilities: ProviderCapabilities
+  /** Normalised, non-secret vendor state. */
+  profile: AccountProfilePublic
 }
 
 export interface ApiKeyPublic {
@@ -50,6 +43,8 @@ export interface ApiKeyPublic {
   last4: string
   enabled: boolean
   allowedModels: string[]
+  /** Empty means every provider is allowed. */
+  allowedProviders: string[]
   boundAccountId: string | null
   rpm: number
   createdAt: number
@@ -319,6 +314,7 @@ export interface LogEntry {
   keyPrefix: string
   accountId: string
   accountName: string
+  providerId: string
   stream: boolean
   status: number
   promptTokens: number
@@ -339,17 +335,7 @@ export interface BenefitEvent {
   detail: string
 }
 
-export interface CheckinResult {
-  accountId: string
-  name: string
-  points: number
-  spark: number
-  pointsDelta: number
-  plan: string
-  popups: number
-  actions: string[]
-  error: string
-}
+export type { CheckinResult } from './providers.js'
 
 export interface AuthSessionInfo {
   authenticated: boolean
@@ -397,34 +383,10 @@ export interface LoginGeetest {
   new_captcha: boolean
 }
 
-export interface ImportAccountInput {
-  token?: string
-  ssoSessionId?: string
-  accountId?: string
-  uid?: string
-  mobile?: string
-  modelBearerToken?: string
-  name?: string
-}
-
-export interface ImportFileInput {
-  configToml?: string
-  sessionJson?: string
-  name?: string
-}
-
 export interface ApiErrorBody {
   error: {
     message: string
     type: string
     code: string
   }
-}
-
-export interface AccountTestResult {
-  ok: boolean
-  model: string
-  status: number
-  latencyMs: number
-  message: string
 }

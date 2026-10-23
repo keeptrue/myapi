@@ -36,6 +36,37 @@ export interface AppConfig {
   clientType: string
 }
 
+/**
+ * The upstream addresses and limits handed to provider adapters.
+ *
+ * Adapters receive this rather than `process.env`, so one implementation can run against a
+ * different upstream without code changes, and so an adapter cannot bypass the gateway's
+ * body-size or concurrency limits.
+ */
+export interface UpstreamConfig {
+  upstreamBase: string
+  modelsBase: string
+  workspaceBase: string
+  studioVersion: string
+  clientType: string
+  requestTimeoutSeconds: number
+  maxBodyMb: number
+  maxConcurrency: number
+}
+
+export function upstreamConfigFromSettings(settings: Settings): UpstreamConfig {
+  return {
+    upstreamBase: settings.upstreamBase,
+    modelsBase: settings.modelsBase,
+    workspaceBase: settings.workspaceBase,
+    studioVersion: settings.studioVersion,
+    clientType: settings.clientType,
+    requestTimeoutSeconds: settings.requestTimeoutSeconds,
+    maxBodyMb: settings.maxBodyMb,
+    maxConcurrency: settings.maxConcurrency,
+  }
+}
+
 function readArg(argv: readonly string[], name: string): string | undefined {
   const index = argv.indexOf(name)
   if (index === -1) return undefined

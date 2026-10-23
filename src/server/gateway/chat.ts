@@ -1,13 +1,13 @@
 import type { FastifyReply } from 'fastify'
 import type { StoredAccount, StoredApiKey } from '../store/schema.js'
-import type { CatalogService } from '../astron/catalog.js'
+import type { CatalogService } from '../providers/astudio/catalog.js'
 import type { GatewayEngine } from './engine.js'
 import { readTextLimited, usageFrom } from './engine.js'
 import { describeRequest, dropUnsupportedEffort, repairChatBody, sanitizeBody, SHAPE_FALLBACKS, type GatewayShape, isRecord } from './repair.js'
 import { relayChatStream, type RelayMeta } from './relay.js'
 import { GatewayError } from './select.js'
 import { logger as rootLogger } from '../logger.js'
-import { truncate } from '../util.js'
+import { accountLabel, truncate } from '../util.js'
 import type { UsageService } from './usage.js'
 
 const MAX_BUFFER_BYTES = 32 * 1024 * 1024
@@ -231,7 +231,8 @@ export class ChatGateway {
       keyId: input.key.id,
       keyPrefix: input.key.prefix,
       accountId: account.id,
-      accountName: account.nickname || account.name || account.accountId,
+      accountName: accountLabel(account),
+      providerId: account.providerId,
       stream: false,
       status: 200,
       promptTokens: usage?.prompt ?? 0,
@@ -256,7 +257,8 @@ export class ChatGateway {
       keyId: input.key.id,
       keyPrefix: input.key.prefix,
       accountId: account?.id ?? '',
-      accountName: account === undefined ? '' : (account.nickname || account.name || account.accountId),
+      accountName: account === undefined ? '' : accountLabel(account),
+      providerId: account?.providerId ?? '',
       stream: false,
       status: response.status,
       promptTokens: 0,
@@ -282,6 +284,7 @@ export class ChatGateway {
       keyPrefix: input.key.prefix,
       accountId: '',
       accountName: '',
+      providerId: '',
       stream: false,
       status,
       promptTokens: 0,

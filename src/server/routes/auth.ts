@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { APP_VERSION, PANEL_COOKIE, PANEL_SESSION_TTL_SECONDS } from '../../shared/constants.js'
 import type { Services } from '../services.js'
-import { AstronError } from '../astron/types.js'
+import { AstronError } from '../providers/astudio/types.js'
 import { clientIp, jsonError, requirePanel } from './helpers.js'
 
 function cookieOptions(request: FastifyRequest): {
@@ -117,7 +117,7 @@ export function registerAuthRoutes(app: FastifyInstance, services: Services): vo
 
   app.get('/api/system', { preHandler: panel }, async () => {
     const settings = services.store.settings
-    const catalog = services.catalog.current
+    const catalog = services.astudioCatalog.current
     return {
       version: APP_VERSION,
       startedAt: services.startedAt,
