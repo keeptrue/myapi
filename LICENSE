@@ -1,0 +1,64 @@
+MIT License
+
+Copyright (c) 2026 Inkedus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+使用声明 / Additional Use Restrictions
+
+MIT 正文之上，本项目追加以下限制。两者对同一行为给出不同结论时，以更严格的一方为准。
+
+1. 仅供个人学习与研究
+
+本项目是一个用于学习 HTTP 反向代理、SSE 流式透传、多上游协议适配与服务端工程等
+技术主题的实践项目。仅供个人学习与研究使用，不是任何上游厂商的官方产品，也未获得
+其授权、认可或赞助。
+
+2. 禁止用途
+
+禁止将本项目用于任何商业用途、二次分发牟利、批量账号运营、绕过上游计费或配额限制，
+或其他违反当地法律法规的活动。如需在生产环境或商业场景中调用相关模型服务，请使用
+官方渠道与官方 API。
+
+3. 关于反向代理行为
+
+本项目实现的是本地反向代理：在你自己的机器上复用你自己账号的登录态，把请求转发到
+官方上游网关。它不破解、不绕过任何付费或权限校验，使用的额度始终来自你自己账号本就
+拥有的配额。
+
+但需要明确的是，这种「以非官方客户端形态复用登录态」的转发方式，可能不符合上游服务
+的用户协议或使用条款；是否使用、由此产生的一切后果（包括但不限于账号被限流、被风控、
+被冻结或封禁），均由使用者自行承担。
+
+4. 凭证与数据风险
+
+本项目会把账号凭证（accessToken / refreshToken / Cookie 等）以加密形式保存在本机
+数据目录中，导出功能生成的文件同样包含凭证。请自行妥善保管，切勿提交到公开仓库、
+上传到网盘或分享给他人。因凭证泄露造成的损失由使用者自行承担。
+
+5. 无担保
+
+本项目按「现状」提供，作者不对其可用性、稳定性、安全性或对特定用途的适用性作任何
+承诺。上游接口随时可能变更，本项目可能随时失效而不再维护。
+
+本项目与各上游厂商及其官方产品均无关；文中出现的名称仅用于描述兼容关系，相关商标与
+服务的权利归其各自所有者。若权利方认为本项目存在不当之处，请联系作者，将及时调整或
+删除。
