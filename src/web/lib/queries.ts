@@ -29,6 +29,10 @@ export function useBenefitEvents(limit = 100) {
   return useQuery({ queryKey: ['benefit-events', limit], queryFn: () => endpoints.benefitEvents(limit), refetchInterval: 30_000 })
 }
 
+export function useProviders() {
+  return useQuery({ queryKey: ['providers'], queryFn: endpoints.providers, refetchInterval: 60_000 })
+}
+
 export function useKeys() {
   return useQuery({ queryKey: ['keys'], queryFn: endpoints.keys })
 }

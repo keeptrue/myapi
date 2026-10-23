@@ -47,6 +47,7 @@ export function registerKeyRoutes(app: FastifyInstance, services: Services): voi
     if (typeof record['name'] === 'string' && record['name'].trim() !== '') patch.name = record['name'].trim()
     if (typeof record['enabled'] === 'boolean') patch.enabled = record['enabled']
     if (Array.isArray(record['allowedModels'])) patch.allowedModels = stringList(record['allowedModels'])
+    if (Array.isArray(record['allowedProviders'])) patch.allowedProviders = stringList(record['allowedProviders'])
     if (record['boundAccountId'] !== undefined) {
       const bound = validateBinding(services, record['boundAccountId'])
       if (bound === undefined) return jsonError(reply, 400, '绑定账号不存在')

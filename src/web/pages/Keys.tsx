@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import type { KeyDto } from '../lib/api.js'
 import { accountName, hasFullCredential, points, spark, planName, planActive, credentialBadge, checkinDeltaText } from '../lib/accounts.js'
 import { endpoints } from '../lib/api.js'
-import { useAccounts, useKeys, useModels } from '../lib/queries.js'
+import { useAccounts, useKeys, useModels, useProviders } from '../lib/queries.js'
 import { errorMessage, timeAgo } from '../lib/format.js'
 import {
   Badge,
@@ -32,6 +32,7 @@ export function Keys(): React.ReactElement {
   const keys = useKeys()
   const accounts = useAccounts()
   const models = useModels()
+  const providers = useProviders()
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = React.useState(false)
   const [busy, setBusy] = React.useState('')
@@ -42,6 +43,7 @@ export function Keys(): React.ReactElement {
   const [boundAccountId, setBoundAccountId] = React.useState('')
   const [rpm, setRpm] = React.useState('0')
   const [modelsText, setModelsText] = React.useState('')
+  const [allowedProviders, setAllowedProviders] = React.useState<string[]>([])
 
   const invalidate = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['keys'] })
@@ -52,6 +54,7 @@ export function Keys(): React.ReactElement {
     setBoundAccountId('')
     setRpm('0')
     setModelsText('')
+    setAllowedProviders([])
   }
 
   const create = async (): Promise<void> => {
@@ -61,6 +64,7 @@ export function Keys(): React.ReactElement {
       const result = await endpoints.createKey({
         name: name.trim() === '' ? '默认密钥' : name.trim(),
         allowedModels,
+        allowedProviders,
         boundAccountId: boundAccountId === '' ? null : boundAccountId,
         rpm: Number(rpm) || 0,
       })
@@ -157,6 +161,7 @@ export function Keys(): React.ReactElement {
                     <th>Key</th>
                     <th>绑定账号</th>
                     <th>模型限制</th>
+                      <th>提供商范围</th>
                     <th className="num">RPM</th>
                     <th>最近使用</th>
                     <th>启用</th>
@@ -170,6 +175,7 @@ export function Keys(): React.ReactElement {
                       <td><code className="code">{key.prefix}…{key.last4}</code></td>
                       <td className="muted">{keyLabel(key.boundAccountId)}</td>
                       <td className="muted">{key.allowedModels.length === 0 ? '全部模型' : `${key.allowedModels.length} 个`}</td>
+                      <td className="muted">{key.allowedProviders.length === 0 ? '全部提供商' : key.allowedProviders.length === 1 ? key.allowedProviders[0] : `${key.allowedProviders.length} 家`}</td>
                       <td className="num">{key.rpm === 0 ? '不限' : key.rpm}</td>
                       <td className="faint">{timeAgo(key.lastUsedAt)}</td>
                       <td>
@@ -207,6 +213,25 @@ export function Keys(): React.ReactElement {
               </Field>
               <Field label="每分钟请求上限" hint="0 表示不限制；超过后返回 429。">
                 <Input type="number" min={0} max={6000} value={rpm} onChange={event => setRpm(event.target.value)} />
+              </Field>
+              <Field label="允许的提供商" hint="留空表示全部允许。选了范围后，只有这些提供商的账号会参与路由。">
+                <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+                  {providers.data?.providers.map(provider => (
+                    <label key={provider.id} className="row" style={{ gap: 6, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={allowedProviders.includes(provider.id)}
+                        onChange={() => setAllowedProviders(current =>
+                          current.includes(provider.id)
+                            ? current.filter(item => item !== provider.id)
+                            : [...current, provider.id])}
+                      />
+                      <span style={{ fontSize: 12.5 }}>{provider.displayName}</span>
+                      <span className="faint" style={{ fontSize: 10.5 }}>{provider.vendor}</span>
+                    </label>
+                  ))}
+                  {providers.data?.providers.length === 0 && <span className="faint" style={{ fontSize: 12 }}>还没有注册的提供商</span>}
+                </div>
               </Field>
               <Field label="模型白名单" hint="逗号或换行分隔；留空表示允许目录中的全部模型。">
                 <Textarea value={modelsText} onChange={event => setModelsText(event.target.value)} placeholder={models.data?.models.slice(0, 3).map(model => model.slug).join(', ') ?? 'xopglm52, spark-x2.5'} />
@@ -249,6 +274,23 @@ export function Keys(): React.ReactElement {
             ))}
           </Select>
         </Field>
+          <Field label="允许的提供商" hint="留空 = 全部">
+            <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+              {providers.data?.providers.map(provider => (
+                <label key={provider.id} className="row" style={{ gap: 6, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={allowedProviders.includes(provider.id)}
+                    onChange={() => setAllowedProviders(current =>
+                      current.includes(provider.id)
+                        ? current.filter(item => item !== provider.id)
+                        : [...current, provider.id])}
+                  />
+                  <span style={{ fontSize: 12.5 }}>{provider.displayName}</span>
+                </label>
+              ))}
+            </div>
+          </Field>
         <div className="form-grid">
           <Field label="每分钟上限">
             <Input type="number" min={0} value={rpm} onChange={event => setRpm(event.target.value)} />

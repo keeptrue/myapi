@@ -76,6 +76,27 @@ export const api = {
 
 export interface AccountDto extends AccountPublic {}
 
+/** Provider roster as the console sees it: identity, capability bits and account counts. */
+export interface ProviderDto {
+  id: string
+  displayName: string
+  vendor: string
+  capabilities: {
+    smsLogin: boolean
+    webLogin: boolean
+    pasteCredential: boolean
+    importFromClient: boolean
+    tokenRenew: boolean
+    catalogRefresh: boolean
+    balanceQuery: boolean
+    checkin: boolean
+    benefits: boolean
+    keepalive: boolean
+  }
+  accounts: number
+  enabledAccounts: number
+}
+
 /** Wire shape for the paste-credential endpoint (legacy AStudio field names). */
 export interface PasteAccountInput {
   providerId?: string
@@ -159,7 +180,21 @@ export const endpoints = {
     api.post<{ account: AccountDto; is_new: boolean }>('/api/login/verify', { mobile, verify_code: code }),
 
   keys: () => api.get<{ keys: KeyDto[] }>('/api/keys'),
-  createKey: (payload: { name: string; allowedModels: string[]; boundAccountId: string | null; rpm: number }) =>
+  providers: () => api.get<{ providers: ProviderDto[] }>('/api/providers'),
+
+  oauthRedirect: () => api.get<{ redirectUri: string; ttlSeconds: number }>('/api/oauth/status'),
+  oauthStart: (providerId: string) =>
+    api.post<{ stateId: string; authorizeUrl: string; redirectUri: string; hint: string; expiresAt: number }>(
+      '/api/oauth/start',
+      { providerId },
+    ),
+  oauthPending: (stateId: string) =>
+    api.get<{ status: 'pending' | 'done' | 'expired' | 'error'; message: string; label?: string }>(
+      `/api/oauth/pending/${encodeURIComponent(stateId)}`,
+    ),
+  oauthExchange: (payload: { providerId: string; stateId: string; callbackUrl: string }) =>
+    api.post<{ ok: boolean; account?: AccountDto; message: string }>('/api/oauth/exchange', payload),
+  createKey: (payload: { name: string; allowedModels: string[]; allowedProviders: string[]; boundAccountId: string | null; rpm: number }) =>
     api.post<{ key: string; record: KeyDto }>('/api/keys', payload),
   updateKey: (id: string, patch: Partial<Pick<KeyDto, 'name' | 'enabled' | 'allowedModels' | 'boundAccountId' | 'rpm'>>) =>
     api.patch<{ record: KeyDto }>(`/api/keys/${encodeURIComponent(id)}`, patch),
