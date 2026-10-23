@@ -2,6 +2,7 @@ import * as React from 'react'
 import { FileUp, Loader2, MessageSquare, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { endpoints } from '../lib/api.js'
+import { accountName, hasFullCredential, points, spark, planName, planActive, credentialBadge, checkinDeltaText } from '../lib/accounts.js'
 import { errorMessage } from '../lib/format.js'
 import { solveGeetest } from '../lib/geetest.js'
 import { Button, Field, Input, Modal, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from './ui.js'
@@ -74,7 +75,7 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
     setBusy(true)
     try {
       const result = await endpoints.verifySms(mobile.trim(), code.trim())
-      toast.success(`账号已添加：${result.account.nickname || result.account.name}`)
+      toast.success(`账号已添加：${accountName(result.account)}`)
       onAdded()
       onOpenChange(false)
       setCode('')
@@ -99,7 +100,7 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
         modelBearerToken: paste.modelBearerToken.trim(),
         ...(paste.name.trim() === '' ? {} : { name: paste.name.trim() }),
       })
-      toast.success(`账号已导入：${result.account.nickname || result.account.name}`)
+      toast.success(`账号已导入：${accountName(result.account)}`)
       onAdded()
       onOpenChange(false)
     } catch (caught: unknown) {
@@ -118,7 +119,7 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
     setBusy(true)
     try {
       const result = await endpoints.importFile({ configToml, sessionJson })
-      toast.success(`账号已导入：${result.account.nickname || result.account.name}`)
+      toast.success(`账号已导入：${accountName(result.account)}`)
       onAdded()
       onOpenChange(false)
     } catch (caught: unknown) {

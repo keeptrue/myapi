@@ -6,7 +6,7 @@ async function setup(options: { modelsDevFetch?: typeof fetch } = {}) {
   const h = await createHarness(options)
   const cookie = await h.login()
   const accountId = await h.addAccount()
-  await h.services.catalog.refresh()
+  await h.services.astudioCatalog.refresh()
   return { h, cookie, accountId }
 }
 
@@ -120,7 +120,7 @@ describe('model catalog, probing and official metadata routes', () => {
     try {
       const catalog = h.fake.catalog[0]
       if (catalog !== undefined) catalog.inputModalities = ['text', 'image']
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       h.fake.chatHandler = () => chat('red')
       const response = await h.app.inject({
         method: 'POST',
@@ -249,7 +249,7 @@ describe('model catalog, probing and official metadata routes', () => {
     try {
       const cookie = await h.login()
       const accountId = await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       h.services.store.updateAccount(accountId, { enabled: false })
       const response = await h.app.inject({
         method: 'POST',

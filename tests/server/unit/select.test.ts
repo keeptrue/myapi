@@ -7,7 +7,7 @@ describe('account selection', () => {
     try {
       const first = await h.addAccount({ accountId: 'acc-1' })
       const second = await h.addAccount({ accountId: 'acc-2' })
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
       const record = h.services.store.apiKeys.find(item => item.prefix === key.slice(0, 14))
       expect(record).toBeDefined()

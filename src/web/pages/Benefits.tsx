@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { CalendarCheck, CircleDollarSign, Gift, RefreshCw, Ticket, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import type { AccountDto } from '../lib/api.js'
+import { accountName, hasFullCredential, points, spark, planName, planActive, credentialBadge, checkinDeltaText } from '../lib/accounts.js'
 import { endpoints } from '../lib/api.js'
 import { useAccounts, useBenefitEvents, useBenefitSummary } from '../lib/queries.js'
 import { compact, dateTime, errorMessage, int } from '../lib/format.js'
@@ -41,7 +42,7 @@ export function Benefits(): React.ReactElement {
     try {
       const { result } = await endpoints.checkinAccount(account.id)
       if (result.error !== '') toast.error(`签到失败：${result.error}`)
-      else toast.success(`签到完成 · 积分变化 ${result.pointsDelta >= 0 ? '+' : ''}${result.pointsDelta}`)
+      else toast.success(`签到完成 · 积分变化 ${checkinDeltaText(result)}`)
       invalidate()
     } catch (error: unknown) {
       toast.error(errorMessage(error))
@@ -55,7 +56,7 @@ export function Benefits(): React.ReactElement {
     try {
       const { results } = await endpoints.checkinAll()
       const failed = results.filter(item => item.error !== '').length
-      const delta = results.reduce((sum, item) => sum + item.pointsDelta, 0)
+      const delta = results.reduce((sum, item) => sum + item.deltas.reduce((acc, delta) => acc + delta.value, 0), 0)
       toast.success(`完成 ${results.length} 个账号${failed > 0 ? `，失败 ${failed}` : ''} · 积分变化 ${delta >= 0 ? '+' : ''}${delta}`)
       invalidate()
     } catch (error: unknown) {
@@ -95,7 +96,7 @@ export function Benefits(): React.ReactElement {
   }
 
   const list = accounts.data?.accounts ?? []
-  const cookieAccounts = list.filter(account => account.credentials.cookie && account.enabled)
+  const cookieAccounts = list.filter(account => hasFullCredential(account) && account.enabled)
 
   return (
     <>
@@ -144,18 +145,18 @@ export function Benefits(): React.ReactElement {
               <tbody>
                 {list.map(account => (
                   <tr key={account.id}>
-                    <td style={{ fontWeight: 550 }}>{account.nickname || account.name}</td>
-                    <td className="num">{account.pointsKnown ? int(account.pointsBalance) : '—'}</td>
-                    <td className="num">{account.pointsKnown ? int(account.sparkBalance) : '—'}</td>
-                    <td>{account.planName === '' ? <span className="faint">—</span> : <Badge tone={account.planActive ? 'cyan' : 'default'}>{account.planName}</Badge>}</td>
-                    <td className="num">{account.pendingPopups}</td>
-                    <td>{account.credentials.cookie ? <Badge tone={account.sessionOk ? 'success' : 'warning'} dot>{account.sessionOk ? '有效' : '待刷新'}</Badge> : <Badge>仅模型</Badge>}</td>
-                    <td className="faint">{account.lastClaimAt === 0 ? '从未' : dateTime(account.lastClaimAt)}</td>
+                    <td style={{ fontWeight: 550 }}>{accountName(account)}</td>
+                    <td className="num">{points(account).known ? int(points(account).value) : '—'}</td>
+                    <td className="num">{spark(account).known ? int(spark(account).value) : '—'}</td>
+                    <td>{planName(account) === '' ? <span className="faint">—</span> : <Badge tone={planActive(account) ? 'cyan' : 'default'}>{planName(account)}</Badge>}</td>
+                    <td className="num">{account.profile.pendingClaims}</td>
+                    <td>{hasFullCredential(account) ? <Badge tone={account.sessionOk ? 'success' : 'warning'} dot>{account.sessionOk ? '有效' : '待刷新'}</Badge> : <Badge>仅模型</Badge>}</td>
+                    <td className="faint">{account.profile.lastClaimAt === 0 ? '从未' : dateTime(account.profile.lastClaimAt)}</td>
                     <td>
                       <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
-                        <Button size="sm" variant="ghost" loading={busy === `${account.id}:checkin`} disabled={!account.credentials.cookie} onClick={() => void checkin(account)}>签到</Button>
-                        <Button size="sm" variant="ghost" loading={busy === `${account.id}:keepalive`} disabled={!account.credentials.cookie} onClick={() => void keepalive(account)}>保活</Button>
-                        <Button size="sm" variant="ghost" disabled={!account.credentials.cookie} onClick={() => { setRedeemTarget(account); setCode('') }}><Ticket size={13} />兑换</Button>
+                        <Button size="sm" variant="ghost" loading={busy === `${account.id}:checkin`} disabled={!hasFullCredential(account)} onClick={() => void checkin(account)}>签到</Button>
+                        <Button size="sm" variant="ghost" loading={busy === `${account.id}:keepalive`} disabled={!hasFullCredential(account)} onClick={() => void keepalive(account)}>保活</Button>
+                        <Button size="sm" variant="ghost" disabled={!hasFullCredential(account)} onClick={() => { setRedeemTarget(account); setCode('') }}><Ticket size={13} />兑换</Button>
                       </div>
                     </td>
                   </tr>
@@ -200,7 +201,7 @@ export function Benefits(): React.ReactElement {
         open={redeemTarget !== null}
         onOpenChange={open => { if (!open) setRedeemTarget(null) }}
         title="兑换码"
-        description={redeemTarget === null ? '' : `在 ${redeemTarget.nickname || redeemTarget.name} 上兑换`}
+        description={redeemTarget === null ? '' : `在 ${accountName(redeemTarget)} 上兑换`}
         footer={(
           <>
             <Button variant="ghost" onClick={() => setRedeemTarget(null)}>取消</Button>

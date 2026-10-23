@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { KeyRound, MoreHorizontal, Plus, RefreshCw, ScrollText, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { KeyDto } from '../lib/api.js'
+import { accountName, hasFullCredential, points, spark, planName, planActive, credentialBadge, checkinDeltaText } from '../lib/accounts.js'
 import { endpoints } from '../lib/api.js'
 import { useAccounts, useKeys, useModels } from '../lib/queries.js'
 import { errorMessage, timeAgo } from '../lib/format.js'
@@ -115,10 +116,10 @@ export function Keys(): React.ReactElement {
   }
 
   const list = keys.data?.keys ?? []
-  const accountName = (id: string | null): string => {
+  const keyLabel = (id: string | null): string => {
     if (id === null) return '任意账号'
     const account = accounts.data?.accounts.find(item => item.id === id)
-    return account?.nickname || account?.name || '已删除账号'
+    return account === undefined ? '已删除账号' : accountName(account)
   }
 
   return (
@@ -167,7 +168,7 @@ export function Keys(): React.ReactElement {
                     <tr key={key.id}>
                       <td style={{ fontWeight: 550 }}>{key.name}</td>
                       <td><code className="code">{key.prefix}…{key.last4}</code></td>
-                      <td className="muted">{accountName(key.boundAccountId)}</td>
+                      <td className="muted">{keyLabel(key.boundAccountId)}</td>
                       <td className="muted">{key.allowedModels.length === 0 ? '全部模型' : `${key.allowedModels.length} 个`}</td>
                       <td className="num">{key.rpm === 0 ? '不限' : key.rpm}</td>
                       <td className="faint">{timeAgo(key.lastUsedAt)}</td>
@@ -200,7 +201,7 @@ export function Keys(): React.ReactElement {
                 <Select value={boundAccountId} onChange={event => setBoundAccountId(event.target.value)}>
                   <option value="">任意可用账号</option>
                   {accounts.data?.accounts.map(account => (
-                    <option key={account.id} value={account.id}>{account.nickname || account.name}</option>
+                    <option key={account.id} value={account.id}>{accountName(account)}</option>
                   ))}
                 </Select>
               </Field>
@@ -244,7 +245,7 @@ export function Keys(): React.ReactElement {
           <Select value={boundAccountId} onChange={event => setBoundAccountId(event.target.value)}>
             <option value="">任意可用账号</option>
             {accounts.data?.accounts.map(account => (
-              <option key={account.id} value={account.id}>{account.nickname || account.name}</option>
+              <option key={account.id} value={account.id}>{accountName(account)}</option>
             ))}
           </Select>
         </Field>

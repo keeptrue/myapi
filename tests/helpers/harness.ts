@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
-import { createServices, type Services } from '../../src/server/services.js'
+import { createServices, refreshUnifiedCatalog, type Services } from '../../src/server/services.js'
 import { buildApp } from '../../src/server/app.js'
 import type { AppConfig } from '../../src/server/config.js'
 import { FakeAstron } from './fake-astron.js'
@@ -47,6 +47,7 @@ export async function createHarness(options: { modelsDevFetch?: typeof fetch } =
       ...(options.modelsDevFetch === undefined ? {} : { fetchImpl: options.modelsDevFetch }),
     },
   })
+  await refreshUnifiedCatalog(services)
   const app = await buildApp(services, { serveWeb: false })
   const sockets: string[] = []
 
@@ -66,10 +67,11 @@ export async function createHarness(options: { modelsDevFetch?: typeof fetch } =
     return cookie
   }
 
-  const createKey = (input: { name?: string; allowedModels?: string[]; boundAccountId?: string | null } = {}): string => {
+  const createKey = (input: { name?: string; allowedModels?: string[]; allowedProviders?: string[]; boundAccountId?: string | null } = {}): string => {
     const created = services.auth.createApiKey({
       name: input.name ?? 'test',
       allowedModels: input.allowedModels ?? [],
+      allowedProviders: input.allowedProviders ?? [],
       boundAccountId: input.boundAccountId ?? null,
       rpm: 0,
     })
@@ -91,6 +93,8 @@ export async function createHarness(options: { modelsDevFetch?: typeof fetch } =
       uid: `uid-${accountId}`,
       mobile: '13800138000',
     })
+    // A new account can change what the unified catalog resolves to, so refresh it too.
+    await refreshUnifiedCatalog(services)
     return account.id
   }
 

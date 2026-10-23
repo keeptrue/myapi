@@ -1,13 +1,9 @@
 import type {
   AccountPublic,
-  AccountTestResult,
   ApiKeyPublic,
   AuthSessionInfo,
   BenefitEvent,
   BenefitSummary,
-  CheckinResult,
-  ImportAccountInput,
-  ImportFileInput,
   LogEntry,
   LoginGeetest,
   ModelCapabilities,
@@ -21,6 +17,10 @@ import type {
   SystemInfo,
   UsageSummary,
 } from '../../shared/types.js'
+import type {
+  AccountTestResult,
+  CheckinResult,
+} from '../../shared/providers.js'
 
 export class ApiError extends Error {
   constructor(
@@ -75,6 +75,26 @@ export const api = {
 }
 
 export interface AccountDto extends AccountPublic {}
+
+/** Wire shape for the paste-credential endpoint (legacy AStudio field names). */
+export interface PasteAccountInput {
+  providerId?: string
+  label?: string
+  token?: string
+  ssoSessionId?: string
+  accountId?: string
+  uid?: string
+  mobile?: string
+  modelBearerToken?: string
+}
+
+/** Wire shape for the file-import endpoint. */
+export interface ImportFileAccountInput {
+  providerId?: string
+  label?: string
+  configToml?: string
+  sessionJson?: string
+}
 export interface KeyDto extends ApiKeyPublic {}
 export interface ModelDto extends ModelInfo {
   hidden: boolean
@@ -111,9 +131,9 @@ export const endpoints = {
   system: () => api.get<SystemInfo>('/api/system'),
 
   accounts: () => api.get<{ accounts: AccountDto[] }>('/api/accounts'),
-  importAccount: (input: ImportAccountInput) => api.post<{ account: AccountDto }>('/api/accounts/import', input),
-  importFile: (input: ImportFileInput) => api.post<{ account: AccountDto }>('/api/accounts/import-file', input),
-  updateAccount: (id: string, patch: Partial<Pick<AccountDto, 'name' | 'enabled' | 'domainAccount'>>) =>
+  importAccount: (input: PasteAccountInput) => api.post<{ account: AccountDto }>('/api/accounts/import', input),
+  importFile: (input: ImportFileAccountInput) => api.post<{ account: AccountDto }>('/api/accounts/import-file', input),
+  updateAccount: (id: string, patch: { label?: string; enabled?: boolean; domainAccount?: string }) =>
     api.patch<{ account: AccountDto }>(`/api/accounts/${encodeURIComponent(id)}`, patch),
   deleteAccount: (id: string) => api.del<{ ok: boolean }>(`/api/accounts/${encodeURIComponent(id)}`),
   refreshAccount: (id: string) => api.post<{ account: AccountDto }>(`/api/accounts/${encodeURIComponent(id)}/refresh`),

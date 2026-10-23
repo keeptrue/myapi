@@ -36,8 +36,8 @@ describe('SMS login flow', () => {
       })
       expect(verify.statusCode).toBe(200)
       expect(h.fake.loginCalls).toBe(1)
-      const body = verify.json() as { account: { accountId: string; sessionOk: boolean } }
-      expect(body.account.accountId).toBe('account-1')
+      const body = verify.json() as { account: { sessionOk: boolean; profile: { extra: Record<string, string> } } }
+      expect(body.account.profile.extra.accountId).toBe('account-1')
       expect(body.account.sessionOk).toBe(true)
       expect(h.services.store.accounts).toHaveLength(1)
     } finally {

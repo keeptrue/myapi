@@ -13,7 +13,7 @@ import type {
   RedeemResult,
   TenantApp,
   UserInfo,
-} from '../../src/server/astron/types.js'
+} from '../../src/server/providers/astudio/types.js'
 
 function sse(chunks: string[]): Response {
   const encoder = new TextEncoder()

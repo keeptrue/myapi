@@ -15,13 +15,13 @@ describe('v1 gateway', () => {
       expect(unauth.json()).toMatchObject({ error: { code: 'auth_required' } })
 
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
       const models = await h.app.inject({ method: 'GET', url: '/v1/models', headers: auth(key) })
       expect(models.statusCode).toBe(200)
-      const payload = models.json() as { data: Array<{ id: string; astron: { available: boolean } }> }
-      expect(payload.data.map(item => item.id).sort()).toEqual(['spark-x2.5', 'xopglm52'])
-      expect(payload.data.find(item => item.id === 'xopglm52')?.astron.available).toBe(true)
+      const payload = models.json() as { data: Array<{ id: string; providers: Array<{ available: boolean }> }> }
+      expect(payload.data.map(item => item.id).sort()).toEqual(['glm-5.2', 'spark-x2.5'])
+      expect(payload.data.find(item => item.id === 'glm-5.2')?.providers[0]?.available).toBe(true)
     } finally {
       await h.close()
     }
@@ -31,7 +31,7 @@ describe('v1 gateway', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
       const response = await h.app.inject({
         method: 'POST',
@@ -54,7 +54,7 @@ describe('v1 gateway', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
       h.fake.chatHandler = () => sse([
         'data: {"id":"c1","object":"chat.completion.chunk","model":"xopglm52","choices":[{"index":0,"delta":{"content":"he"}}]}\n\n',
@@ -82,7 +82,7 @@ describe('v1 gateway', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
 
       const response = await h.app.inject({
@@ -111,7 +111,7 @@ describe('v1 gateway', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
       h.fake.chatHandler = () => sse([
         'data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hel"}}]}\n\n',
@@ -137,7 +137,7 @@ describe('v1 gateway', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
       h.fake.chatHandler = (body) => json({
         id: 'resp_1',
@@ -166,7 +166,7 @@ describe('v1 gateway', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey({ allowedModels: ['spark-x2.5'] })
       const response = await h.app.inject({
         method: 'POST',
@@ -186,7 +186,7 @@ describe('v1 gateway', () => {
     try {
       const first = await h.addAccount({ accountId: 'acc-1' })
       const second = await h.addAccount({ accountId: 'acc-2' })
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
       let calls = 0
       h.fake.chatHandler = () => {
@@ -219,7 +219,7 @@ describe('v1 gateway', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       const key = h.createKey()
       let calls = 0
       const refreshBefore = h.fake.refreshCalls

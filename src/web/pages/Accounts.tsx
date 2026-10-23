@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { BadgeCheck, CalendarCheck, KeyRound, MoreHorizontal, Plus, RefreshCw, Trash2, Users, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import type { AccountDto } from '../lib/api.js'
+import { accountName, hasFullCredential, points, spark, planName, planActive, credentialBadge, checkinDeltaText, profileField } from '../lib/accounts.js'
 import { endpoints } from '../lib/api.js'
 import { useAccounts } from '../lib/queries.js'
 import { compact, cooldown, errorMessage, int, percent, timeAgo } from '../lib/format.js'
@@ -72,7 +73,7 @@ export function Accounts(): React.ReactElement {
     void run(account.id, 'checkin', async () => {
       const { result } = await endpoints.checkinAccount(account.id)
       if (result.error !== '') toast.error(`签到失败：${result.error}`)
-      else toast.success(`签到完成 · 积分变化 ${result.pointsDelta >= 0 ? '+' : ''}${result.pointsDelta}${result.actions.length > 0 ? ` · ${result.actions.join('、')}` : ''}`)
+      else toast.success(`签到完成 · 积分变化 ${checkinDeltaText(result)}${result.actions.length > 0 ? ` · ${result.actions.join('、')}` : ''}`)
       invalidate()
     })
   }
@@ -97,7 +98,7 @@ export function Accounts(): React.ReactElement {
     try {
       const { results } = await endpoints.checkinAll()
       const failed = results.filter(item => item.error !== '')
-      const gained = results.reduce((sum, item) => sum + item.pointsDelta, 0)
+      const gained = results.reduce((sum, item) => sum + item.deltas.reduce((acc, delta) => acc + delta.value, 0), 0)
       if (failed.length > 0) toast.warning(`完成 ${results.length} 个账号，${failed.length} 个失败，积分变化 ${gained >= 0 ? '+' : ''}${gained}`)
       else toast.success(`全部签到完成 · 积分变化 ${gained >= 0 ? '+' : ''}${gained}`)
       invalidate()
@@ -140,9 +141,9 @@ export function Accounts(): React.ReactElement {
 
   const list = accounts.data?.accounts ?? []
   const ready = list.filter(account => account.enabled && account.cooldownUntil <= Date.now()).length
-  const points = list.reduce((sum, account) => sum + account.pointsBalance, 0)
-  const spark = list.reduce((sum, account) => sum + account.sparkBalance, 0)
-  const popups = list.reduce((sum, account) => sum + account.pendingPopups, 0)
+  const totalPoints = list.reduce((sum, account) => sum + points(account).value, 0)
+  const totalSpark = list.reduce((sum, account) => sum + spark(account).value, 0)
+  const popups = list.reduce((sum, account) => sum + account.profile.pendingClaims, 0)
 
   return (
     <>
@@ -162,10 +163,10 @@ export function Accounts(): React.ReactElement {
 
       <div className="grid-stats">
         <StatCard label="账号" value={compact(list.length)} hint={`${ready} 个当前可用`} icon={<Users size={12} />} />
-        <StatCard label="通用积分" value={int(points)} hint="所有账号合计" icon={<Wallet size={12} />} />
-        <StatCard label="Spark 积分" value={int(spark)} hint="Spark 模型专用" icon={<Wallet size={12} />} />
+        <StatCard label="通用积分" value={int(totalPoints)} hint="所有账号合计" icon={<Wallet size={12} />} />
+        <StatCard label="Spark 积分" value={int(totalSpark)} hint="Spark 模型专用" icon={<Wallet size={12} />} />
         <StatCard label="待领弹窗" value={compact(popups)} hint="每日奖励 / 下载奖励" icon={<BadgeCheck size={12} />} />
-        <StatCard label="需要处理" value={compact(list.filter(account => !account.enabled || account.cooldownUntil > Date.now() || (account.credentials.cookie && !account.sessionOk)).length)} hint="凭据过期或冷却中" icon={<KeyRound size={12} />} />
+        <StatCard label="需要处理" value={compact(list.filter(account => !account.enabled || account.cooldownUntil > Date.now() || (hasFullCredential(account) && !account.sessionOk)).length)} hint="凭据过期或冷却中" icon={<KeyRound size={12} />} />
       </div>
 
       <Card>
@@ -204,13 +205,13 @@ export function Accounts(): React.ReactElement {
                       <td>
                         <div style={{ display: 'grid', gap: 2 }}>
                           <div className="row" style={{ gap: 7 }}>
-                            <span style={{ fontWeight: 550 }}>{account.nickname || account.name}</span>
-                            <Badge tone={account.source === 'sms-login' ? 'accent' : account.source === 'model-only' ? 'warning' : 'default'}>
-                              {account.source === 'sms-login' ? '短信' : account.source === 'model-only' ? '仅模型' : account.source === 'file-import' ? '文件' : '粘贴'}
+                            <span style={{ fontWeight: 550 }}>{accountName(account)}</span>
+                            <Badge tone={credentialBadge(account.credentialKind).tone}>
+                              {credentialBadge(account.credentialKind).label}
                             </Badge>
                           </div>
                           <span className="mono" style={{ fontSize: 10, color: 'var(--faint)' }}>
-                            {account.mobileMasked || account.accountId || account.uid || account.id.slice(0, 12)}
+                            {account.profile.mobileMasked || account.id.slice(0, 12)}
                           </span>
                         </div>
                       </td>
@@ -227,9 +228,9 @@ export function Accounts(): React.ReactElement {
                           )}
                         </div>
                       </td>
-                      <td className="num">{account.pointsKnown ? int(account.pointsBalance) : '—'}</td>
-                      <td className="num">{account.pointsKnown ? int(account.sparkBalance) : '—'}</td>
-                      <td>{account.planName !== '' ? <Badge tone={account.planActive ? 'cyan' : 'default'}>{account.planName}</Badge> : <span className="faint">—</span>}</td>
+                      <td className="num">{points(account).known ? int(points(account).value) : '—'}</td>
+                      <td className="num">{spark(account).known ? int(spark(account).value) : '—'}</td>
+                      <td>{planName(account) !== '' ? <Badge tone={planActive(account) ? 'cyan' : 'default'}>{planName(account)}</Badge> : <span className="faint">—</span>}</td>
                       <td className="num">{total === 0 ? '—' : percent(account.successes / total)}</td>
                       <td className="faint" style={{ fontSize: 11.5 }}>{timeAgo(account.lastUsedAt)}</td>
                       <td>
@@ -237,9 +238,9 @@ export function Accounts(): React.ReactElement {
                           <Menu trigger={<button className="btn btn-ghost btn-icon" aria-label="账号操作"><MoreHorizontal size={16} /></button>}>
                             <MenuItem icon={<RefreshCw size={13} />} onSelect={() => refresh(account)}>刷新凭据与权益</MenuItem>
                             <MenuItem icon={<BadgeCheck size={13} />} onSelect={() => test(account)}>测试连通</MenuItem>
-                            <MenuItem icon={<CalendarCheck size={13} />} onSelect={() => checkin(account)} disabled={!account.credentials.cookie}>签到 / 领权益</MenuItem>
-                            <MenuItem icon={<KeyRound size={13} />} onSelect={() => keepalive(account)} disabled={!account.credentials.cookie}>保活</MenuItem>
-                            <MenuItem onSelect={() => { setDomainTarget(account); setDomainValue(account.domainAccount) }}>设置域账号</MenuItem>
+                            <MenuItem icon={<CalendarCheck size={13} />} onSelect={() => checkin(account)} disabled={!hasFullCredential(account)}>签到 / 领权益</MenuItem>
+                            <MenuItem icon={<KeyRound size={13} />} onSelect={() => keepalive(account)} disabled={!hasFullCredential(account)}>保活</MenuItem>
+                            <MenuItem onSelect={() => { setDomainTarget(account); setDomainValue(profileField(account, 'domainAccount')) }}>设置域账号</MenuItem>
                             <MenuItem onSelect={() => toggle(account, !account.enabled)}>{account.enabled ? '停用账号' : '启用账号'}</MenuItem>
                             <MenuSeparator />
                             <MenuItem icon={<Trash2 size={13} />} danger onSelect={() => setDeleteTarget(account)}>删除账号</MenuItem>
@@ -270,7 +271,7 @@ export function Accounts(): React.ReactElement {
         open={deleteTarget !== null}
         onOpenChange={open => { if (!open) setDeleteTarget(null) }}
         title="删除账号"
-        description={deleteTarget === null ? '' : `将删除 ${deleteTarget.nickname || deleteTarget.name} 及其绑定的密钥关系。此操作无法撤销。`}
+        description={deleteTarget === null ? '' : `将删除 ${accountName(deleteTarget)} 及其绑定的密钥关系。此操作无法撤销。`}
         confirmLabel="删除"
         danger
         loading={busy.endsWith(':delete')}

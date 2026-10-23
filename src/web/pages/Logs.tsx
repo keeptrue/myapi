@@ -4,6 +4,7 @@ import { Download, RefreshCw, ScrollText, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { LogEntry } from '../../shared/types.js'
 import { endpoints, exportUrl } from '../lib/api.js'
+import { accountName } from '../lib/accounts.js'
 import { useAccounts, useModels } from '../lib/queries.js'
 import { compact, dateTime, errorMessage, fullDateTime, ms } from '../lib/format.js'
 import {
@@ -79,7 +80,7 @@ export function Logs(): React.ReactElement {
               </Select>
               <Select value={accountId} onChange={event => setAccountId(event.target.value)} style={{ width: 160, height: 30 }}>
                 <option value="">全部账号</option>
-                {accounts.data?.accounts.map(item => <option key={item.id} value={item.id}>{item.nickname || item.name}</option>)}
+                {accounts.data?.accounts.map(item => <option key={item.id} value={item.id}>{accountName(item)}</option>)}
               </Select>
               <Select value={status} onChange={event => setStatus(event.target.value)} style={{ width: 120, height: 30 }}>
                 <option value="">全部状态</option>

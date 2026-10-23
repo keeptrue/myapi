@@ -5,6 +5,7 @@ import { Activity, ArrowUpRight, Boxes, CircleDollarSign, Cpu, Gauge, RefreshCw,
 import { PageHeader, Card, CardHead, StatCard, Badge, Button, LoadingBlock, EmptyState } from '../components/ui.js'
 import { ModelBars, TrafficChart } from '../components/charts.js'
 import { useAccounts, useBenefitSummary, useModels, useSummary, useSystem } from '../lib/queries.js'
+import { accountName, hasFullCredential, points, spark, planName, planActive, credentialBadge, checkinDeltaText } from '../lib/accounts.js'
 import { compact, dateTime, int, ms, percent, timeAgo } from '../lib/format.js'
 import { endpoints } from '../lib/api.js'
 import { useQuery } from '@tanstack/react-query'
@@ -80,10 +81,10 @@ export function Overview(): React.ReactElement {
                   <div key={account.id} className="row-between" style={{ gap: 8 }}>
                     <div className="row" style={{ gap: 8, minWidth: 0 }}>
                       <span className={account.sessionOk ? 'dot dot-live' : 'dot dot-warn'} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{account.nickname || account.name}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{accountName(account)}</span>
                     </div>
                     <span className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      {int(account.pointsBalance + account.sparkBalance)} 分
+                      {int(points(account).value + spark(account).value)} 分
                     </span>
                   </div>
                 ))}

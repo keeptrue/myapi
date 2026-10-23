@@ -6,11 +6,11 @@ describe('catalog', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      const snapshot = await h.services.catalog.refresh()
+      const snapshot = await h.services.astudioCatalog.refresh()
       expect(snapshot.source).toBe('live')
       expect(snapshot.models.map(model => model.slug).sort()).toEqual(['spark-x2.5', 'xopglm52'])
 
-      const glm = h.services.catalog.resolve('GLM-5.2')
+      const glm = h.services.astudioCatalog.resolve('GLM-5.2')
       expect(glm?.slug).toBe('xopglm52')
       expect(glm?.contextWindow).toBe(1_000_000)
       expect(glm?.description).toBe('test model')
@@ -18,16 +18,16 @@ describe('catalog', () => {
       expect(glm?.pointMultipliers).toHaveLength(1)
       expect(glm?.available).toBe(true)
 
-      const spark = h.services.catalog.resolve('spark-x2.5')
+      const spark = h.services.astudioCatalog.resolve('spark-x2.5')
       expect(spark?.available).toBe(false)
 
       h.services.store.setAliases({ fast: 'xopglm52' })
-      expect(h.services.catalog.resolve('fast')?.slug).toBe('xopglm52')
-      expect(h.services.catalog.aliasesFor('xopglm52')).toEqual(['fast'])
+      expect(h.services.astudioCatalog.resolve('fast')?.slug).toBe('xopglm52')
+      expect(h.services.astudioCatalog.aliasesFor('xopglm52')).toEqual(['fast'])
 
       h.services.store.setModelHidden('spark-x2.5', true)
-      expect(h.services.catalog.visibleModels().map(model => model.slug)).toEqual(['xopglm52'])
-      expect(h.services.catalog.hidden()).toEqual(['spark-x2.5'])
+      expect(h.services.astudioCatalog.visibleModels().map(model => model.slug)).toEqual(['xopglm52'])
+      expect(h.services.astudioCatalog.hidden()).toEqual(['spark-x2.5'])
     } finally {
       await h.close()
     }
@@ -37,10 +37,10 @@ describe('catalog', () => {
     const h = await createHarness()
     try {
       await h.addAccount()
-      await h.services.catalog.refresh()
+      await h.services.astudioCatalog.refresh()
       h.fake.fetchCatalog = async () => { throw new Error('network down') }
       h.fake.fetchModelConfigs = async () => { throw new Error('network down') }
-      const after = await h.services.catalog.refresh()
+      const after = await h.services.astudioCatalog.refresh()
       expect(after.models).toHaveLength(2)
       expect(after.error).toContain('network down')
     } finally {

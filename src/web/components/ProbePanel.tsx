@@ -4,6 +4,7 @@ import { Check, Copy, FlaskConical, Image as ImageIcon, RotateCcw } from 'lucide
 import { toast } from 'sonner'
 import type { ProbeResultView, ProbeRun } from '../../shared/types.js'
 import type { ModelDto, ProbeRequest } from '../lib/api.js'
+import { accountName, hasFullCredential, points, spark, planName, planActive, credentialBadge, checkinDeltaText } from '../lib/accounts.js'
 import { endpoints } from '../lib/api.js'
 import { useAccounts } from '../lib/queries.js'
 import { compact, dateTime, errorMessage, int, ms } from '../lib/format.js'
@@ -205,7 +206,7 @@ export function ProbePanel({ model }: { model: ModelDto }): React.ReactElement {
   const enabledAccounts = accounts.data?.accounts.filter(account => account.enabled) ?? []
   const accountNames = new Map((accounts.data?.accounts ?? []).map(account => [
     account.id,
-    account.nickname || account.name || account.mobileMasked || account.id,
+    accountName(account) || account.profile.mobileMasked || account.id,
   ]))
 
   React.useEffect(() => {
@@ -319,7 +320,7 @@ export function ProbePanel({ model }: { model: ModelDto }): React.ReactElement {
             <option value="first">首个可调用账号</option>
             <option value="all">全部可用账号（最多 3 个）</option>
             {enabledAccounts.map(account => (
-              <option key={account.id} value={account.id}>{account.nickname || account.name || account.mobileMasked || account.id}</option>
+              <option key={account.id} value={account.id}>{accountName(account) || account.profile.mobileMasked || account.id}</option>
             ))}
           </Select>
         </Field>

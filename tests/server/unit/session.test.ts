@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAstronSession, parseConfigToml, sessionCookie, sessionValid } from '../../../src/server/astron/session.js'
+import { parseAstronSession, parseConfigToml, sessionCookie, sessionValid } from '../../../src/server/providers/astudio/session.js'
 
 describe('config.toml parsing', () => {
   it('reads the bearer and uid', () => {

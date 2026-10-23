@@ -5,20 +5,15 @@ import { describe, expect, it } from 'vitest'
 import { StateStore } from '../../../src/server/store/state.js'
 import { defaultSettings } from '../../../src/server/config.js'
 import { testConfig } from '../../helpers/harness.js'
-import { loadOrCreateSecretKey, open, seal, secretBoxAad } from '../../../src/server/crypto/secretbox.js'
+import { credentialsAad, loadOrCreateSecretKey, open, seal } from '../../../src/server/crypto/secretbox.js'
 import type { StoredAccount } from '../../../src/server/store/schema.js'
 
 function account(id: string, box: ReturnType<typeof seal>): StoredAccount {
   return {
     id,
-    name: id,
-    accountId: id,
-    uid: 'u',
-    tokenEnc: box,
-    mobile: '',
-    nickname: '',
-    domainAccount: '',
-    source: 'paste',
+    providerId: 'astudio',
+    label: id,
+    credentialKind: 'paste',
     enabled: true,
     sessionOk: true,
     statusNote: '',
@@ -27,17 +22,10 @@ function account(id: string, box: ReturnType<typeof seal>): StoredAccount {
     cooldownUntil: 0,
     successes: 0,
     failures: 0,
-    pointsKnown: false,
-    pointsBalance: 0,
-    sparkBalance: 0,
-    planCode: '',
-    planName: '',
-    planActive: false,
-    pendingPopups: 0,
-    lastCheckedAt: 0,
-    lastClaimAt: 0,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    credentialsEnc: box,
+    profile: {},
   }
 }
 
@@ -46,21 +34,21 @@ describe('state store', () => {
     const dir = await mkdtemp(join(tmpdir(), 'myapi-state-'))
     try {
       const config = testConfig(dir)
-      const store = new StateStore(dir, defaultSettings(config))
+      const key = loadOrCreateSecretKey(dir)
+      const store = new StateStore(dir, defaultSettings(config), key)
       const loaded = await store.load()
       expect(loaded.generatedPassword).toMatch(/^[0-9a-f]{32}$/u)
       expect(store.passwordHash()).not.toBe('')
 
-      const key = loadOrCreateSecretKey(dir)
-      const box = seal('token-value', secretBoxAad('acc-1', 'token'), key)
+      const box = seal('token-value', credentialsAad('acc-1', 'astudio'), key)
       store.upsertAccount(account('acc-1', box))
       await store.saveNow()
 
-      const reopened = new StateStore(dir, defaultSettings(config))
+      const reopened = new StateStore(dir, defaultSettings(config), key)
       const second = await reopened.load()
       expect(second.generatedPassword).toBeUndefined()
       expect(reopened.accounts).toHaveLength(1)
-      expect(open(reopened.account('acc-1')?.tokenEnc, secretBoxAad('acc-1', 'token'), key)).toBe('token-value')
+      expect(open(reopened.account('acc-1')?.credentialsEnc, credentialsAad('acc-1', 'astudio'), key)).toBe('token-value')
 
       const versionBefore = reopened.authVersion()
       await reopened.setPassword('new-password')
