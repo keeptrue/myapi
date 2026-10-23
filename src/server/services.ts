@@ -4,6 +4,8 @@ import { loadOrCreateSecretKey } from './crypto/secretbox.js'
 import { StateStore } from './store/state.js'
 import { BenefitStore, LogStore } from './store/logs.js'
 import { AStudioAdapter } from './providers/astudio/adapter.js'
+import { LoomyAdapter } from './providers/loomy/adapter.js'
+import { loadLoomyConfigFromEnv } from './providers/loomy/endpoints.js'
 import { AccountService } from './providers/astudio/accounts.js'
 import { CatalogService } from './providers/astudio/catalog.js'
 import { AstronClient } from './providers/astudio/client.js'
@@ -94,6 +96,7 @@ export async function createServices(config: AppConfig, options: CreateServicesO
   const oauth = new OauthStore()
   const registry = new ProviderRegistry()
   registry.register(new AStudioAdapter(accounts, astudioCatalog, client, store))
+  registry.register(new LoomyAdapter(loadLoomyConfigFromEnv(), masterKey))
 
   const catalog = new UnifiedCatalog(`${config.dataDir}/catalog.json`)
   catalog.setAliases(store.aliases)

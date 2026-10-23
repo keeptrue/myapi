@@ -15,6 +15,7 @@ import type {
   RedeemInput,
   RedeemResult,
   SmsSendInput,
+  SmsSendResult,
   SmsVerifyInput,
   WebLoginCompleteInput,
   WebLoginSession,
@@ -74,8 +75,8 @@ export interface ProviderAdapter {
   /** File pickers the import form should render. `field` keys into `ImportInput.files`. */
   importDescriptors(): { field: string; label: string; hint: string; accept: string }[]
 
-  /** Send an SMS, after the caller has solved human verification in a browser. */
-  sendSms?(input: SmsSendInput, context: AdapterContext): Promise<void>
+  /** Send an SMS, after the caller has solved human verification in a browser (when the provider asks for one). */
+  sendSms?(input: SmsSendInput, context: AdapterContext): Promise<SmsSendResult>
 
   /** Complete an SMS login and produce an account draft. */
   verifySms?(input: SmsVerifyInput, context: AdapterContext): Promise<AccountDraft>

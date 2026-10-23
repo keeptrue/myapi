@@ -3,6 +3,13 @@ import type { CheckinResult } from '../../shared/providers.js'
 import type { StoredAccount } from '../store/schema.js'
 import type { Services } from '../services.js'
 import type { LegacyImportFileInput, LegacyPasteInput } from '../providers/astudio/accounts.js'
+import {
+  checkinAccount,
+  checkinAllAccounts,
+  keepaliveAccount,
+  refreshAccountCredential,
+  testAccount,
+} from '../account-ops.js'
 import { jsonError, requirePanel } from './helpers.js'
 
 function pickModel(services: Services): string | undefined {
@@ -69,9 +76,7 @@ export function registerAccountRoutes(app: FastifyInstance, services: Services):
   app.post('/api/accounts/:id/refresh', { preHandler: panel }, async (request, reply) => {
     const { id } = request.params as { id: string }
     try {
-      await services.accounts.refreshCredential(id)
-      const account = await services.accounts.refreshStatus(id)
-      return { account: services.accounts.toPublic(account) }
+      return { account: await refreshAccountCredential(services, id) }
     } catch (error: unknown) {
       return jsonError(reply, 400, error instanceof Error ? error.message : String(error))
     }
@@ -83,7 +88,7 @@ export function registerAccountRoutes(app: FastifyInstance, services: Services):
     const model = typeof body['model'] === 'string' && body['model'] !== '' ? body['model'] : pickModel(services)
     if (model === undefined) return jsonError(reply, 400, '目录里没有可测试的模型，请先刷新模型目录')
     try {
-      return { result: await services.accounts.test(id, model) }
+      return { result: await testAccount(services, id, model) }
     } catch (error: unknown) {
       return jsonError(reply, 400, error instanceof Error ? error.message : String(error))
     }
@@ -92,25 +97,20 @@ export function registerAccountRoutes(app: FastifyInstance, services: Services):
   app.post('/api/accounts/:id/checkin', { preHandler: panel }, async (request, reply) => {
     const { id } = request.params as { id: string }
     try {
-      return { result: await services.accounts.checkin(id) }
+      return { result: await checkinAccount(services, id) }
     } catch (error: unknown) {
       return jsonError(reply, 400, error instanceof Error ? error.message : String(error))
     }
   })
 
   app.post('/api/accounts/checkin-all', { preHandler: panel }, async () => {
-    const results: CheckinResult[] = []
-    for (const account of services.store.accounts.filter(item => item.enabled && item.credentialsEnc !== undefined)) {
-      results.push(await services.accounts.checkin(account.id))
-    }
-    return { results }
+    return { results: await checkinAllAccounts(services) }
   })
 
   app.post('/api/accounts/:id/keepalive', { preHandler: panel }, async (request, reply) => {
     const { id } = request.params as { id: string }
     try {
-      await services.accounts.keepalive(id)
-      return { ok: true }
+      return await keepaliveAccount(services, id)
     } catch (error: unknown) {
       return jsonError(reply, 400, error instanceof Error ? error.message : String(error))
     }

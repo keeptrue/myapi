@@ -1,5 +1,6 @@
 import { logger as rootLogger } from './logger.js'
-import { accountLabel, localDayKey } from './util.js'
+import { localDayKey } from './util.js'
+import { checkinAllAccounts, keepaliveAllAccounts } from './account-ops.js'
 import type { Services } from './services.js'
 
 const TICK_MS = 60_000
@@ -57,7 +58,7 @@ export class Scheduler {
         const hour = new Date(now).getHours()
         if (hour >= settings.checkinHour && this.services.store.scheduler.lastCheckinDay !== day) {
           this.checkingIn = true
-          void this.checkinAll()
+          void checkinAllAccounts(this.services)
             .catch(error => this.log.warn('check-in failed', error))
             .finally(() => {
               this.checkingIn = false
@@ -70,31 +71,8 @@ export class Scheduler {
     }
   }
 
-  async checkinAll(): Promise<void> {
-    const accounts = this.services.store.accounts.filter(account => account.enabled && account.credentialsEnc !== undefined)
-    for (const account of accounts) {
-      try {
-        const result = await this.services.accounts.checkin(account.id)
-        this.log.info('check-in finished', {
-        account: accountLabel(account),
-        delta: result.deltas.map(item => `${item.key}:${item.value}`).join(','),
-        error: result.error,
-      })
-      } catch (error: unknown) {
-        this.log.warn('check-in failed', error)
-      }
-    }
-  }
-
   async keepaliveAll(): Promise<void> {
-    const accounts = this.services.store.accounts.filter(account => account.enabled)
-    for (const account of accounts) {
-      try {
-        await this.services.accounts.keepalive(account.id)
-      } catch (error: unknown) {
-        this.log.warn('keepalive failed', { account: accountLabel(account), error: error instanceof Error ? error.message : String(error) })
-      }
-    }
+    await keepaliveAllAccounts(this.services)
     this.services.store.setScheduler({ lastKeepaliveAt: Date.now() })
   }
 }

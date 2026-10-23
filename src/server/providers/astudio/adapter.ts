@@ -75,9 +75,14 @@ export class AStudioAdapter implements ProviderAdapter {
     ]
   }
 
-  sendSms(input: SmsSendInput): Promise<void> {
+  sendSms(input: SmsSendInput): Promise<{ ticket?: string }> {
     // The GeeTest triplet was solved by a human in the browser; we only forward it.
-    return dispatchSmsCode(this.client, input.mobile, input.challenge)
+    // The console always builds a challenge object, so emptiness is the real signal.
+    const challenge = input.challenge
+    if (challenge === undefined || challenge.geetest_challenge === '' || challenge.geetest_validate === '' || challenge.geetest_seccode === '') {
+      return Promise.reject(new Error('缺少滑块验证参数，请先完成人机验证'))
+    }
+    return dispatchSmsCode(this.client, input.mobile, challenge).then(() => ({}))
   }
 
   async verifySms(input: SmsVerifyInput): Promise<AccountDraft> {

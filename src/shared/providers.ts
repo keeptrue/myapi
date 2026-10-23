@@ -199,12 +199,22 @@ export interface SmsChallenge {
 
 export interface SmsSendInput {
   mobile: string
-  challenge: SmsChallenge
+  /** Present only for providers whose SMS flow sits behind human verification. */
+  challenge?: SmsChallenge
+}
+
+/** Result of sending an SMS login code. `ticket` carries any opaque send-session id the
+ *  verify step must echo back (e.g. an upstream message id); absent when the provider
+ *  correlates the pair by phone number alone. */
+export interface SmsSendResult {
+  ticket?: string
 }
 
 export interface SmsVerifyInput {
   mobile: string
   code: string
+  /** The `ticket` returned by `sendSms`, when that provider issued one. */
+  ticket?: string
 }
 
 export interface PasteInput {

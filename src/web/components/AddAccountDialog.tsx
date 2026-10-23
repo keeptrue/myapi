@@ -48,8 +48,11 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
   const [code, setCode] = React.useState('')
   const [countdown, setCountdown] = React.useState(0)
   const [smsSent, setSmsSent] = React.useState(false)
+  /** Opaque send-session token from the provider; echoed back on verify. */
+  const [ticket, setTicket] = React.useState('')
 
-  const [paste, setPaste] = React.useState({ token: '', ssoSessionId: '', accountId: '', uid: '', mobile: '', modelBearerToken: '', name: '' })
+  const [pasteFields, setPasteFields] = React.useState<Record<string, string>>({})
+  const [pasteName, setPasteName] = React.useState('')
   const [configToml, setConfigToml] = React.useState('')
   const [sessionJson, setSessionJson] = React.useState('')
   const [configName, setConfigName] = React.useState('')
@@ -121,7 +124,9 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
     setCode('')
     setCountdown(0)
     setSmsSent(false)
-    setPaste({ token: '', ssoSessionId: '', accountId: '', uid: '', mobile: '', modelBearerToken: '', name: '' })
+    setTicket('')
+    setPasteFields({})
+    setPasteName('')
     setConfigToml('')
     setSessionJson('')
     setConfigName('')
@@ -137,7 +142,10 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
 
   React.useEffect(() => {
     if (providerId === '') return
-    setPaste({ token: '', ssoSessionId: '', accountId: '', uid: '', mobile: '', modelBearerToken: '', name: '' })
+    setTicket('')
+    setSmsSent(false)
+    setPasteFields({})
+    setPasteName('')
     setConfigToml('')
     setSessionJson('')
     setConfigName('')
@@ -165,14 +173,22 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
     setError('')
     setBusy(true)
     try {
-      const config = await endpoints.geetest()
-      const solved = await solveGeetest(config.geetest)
-      await endpoints.sendSms({
-        mobile: mobile.trim(),
-        challenge: solved.geetest_challenge,
-        validate: solved.geetest_validate,
-        seccode: solved.geetest_seccode,
-      })
+      // AStudio sits its SMS behind GeeTest; providers without a challenge are sent
+      // straight through. TODO(M7): drive this from a provider-declared signal instead
+      // of an id comparison.
+      if (providerId === 'astudio') {
+        const config = await endpoints.geetest()
+        const solved = await solveGeetest(config.geetest)
+        await endpoints.providerSmsSend(providerId, {
+          mobile: mobile.trim(),
+          challenge: solved.geetest_challenge,
+          validate: solved.geetest_validate,
+          seccode: solved.geetest_seccode,
+        })
+      } else {
+        const result = await endpoints.providerSmsSend(providerId, { mobile: mobile.trim() })
+        setTicket(result.ticket ?? '')
+      }
       setSmsSent(true)
       setCountdown(60)
       toast.success('验证码已发送')
@@ -191,12 +207,17 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
     setError('')
     setBusy(true)
     try {
-      const result = await endpoints.verifySms(mobile.trim(), code.trim())
+      const result = await endpoints.providerSmsVerify(providerId, {
+        mobile: mobile.trim(),
+        code: code.trim(),
+        ...(ticket === '' ? {} : { ticket }),
+      })
       toast.success(`账号已添加：${accountName(result.account)}`)
       onAdded()
       onOpenChange(false)
       setCode('')
       setSmsSent(false)
+      setTicket('')
     } catch (caught: unknown) {
       setError(errorMessage(caught))
     } finally {
@@ -208,16 +229,11 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
     setError('')
     setBusy(true)
     try {
-      const result = await endpoints.importAccount({
-        providerId,
-        token: paste.token.trim(),
-        ssoSessionId: paste.ssoSessionId.trim(),
-        accountId: paste.accountId.trim(),
-        uid: paste.uid.trim(),
-        mobile: paste.mobile.trim(),
-        modelBearerToken: paste.modelBearerToken.trim(),
-        ...(paste.name.trim() === '' ? {} : { name: paste.name.trim() }),
-      })
+      const fields: Record<string, string> = {}
+      for (const [field, value] of Object.entries(pasteFields)) {
+        if (value.trim() !== '') fields[field] = value.trim()
+      }
+      const result = await endpoints.providerPaste(providerId, fields, pasteName.trim() === '' ? undefined : pasteName.trim())
       toast.success(`账号已导入：${accountName(result.account)}`)
       onAdded()
       onOpenChange(false)
@@ -430,31 +446,22 @@ export function AddAccountDialog({ open, onOpenChange, onAdded }: {
               <TabsContent value="paste">
                 <div className="stack" style={{ paddingTop: 16 }}>
                   <div className="banner">
-                    凭据来自本机客户端的数据目录：<code className="code">runtime/acode-home/config.toml</code> 与 <code className="code">userdata/astron-session.json</code>。
-                    浏览器只在本机读取文本，然后提交给网关解析；有 Cookie 时网关会自动换取 modelBearerToken，只填 Bearer 则无法签到。
+                    粘贴该提供商的登录凭据。字段由提供商适配器声明，网关会把凭据整体加密保存。
                   </div>
                   <div className="form-grid">
-                    <Field label="chat token" hint="config.toml 的 experimental_bearer_token">
-                      <Input value={paste.token} onChange={event => setPaste({ ...paste, token: event.target.value })} placeholder="eyJ…" />
-                    </Field>
-                    <Field label="ssoSessionId">
-                      <Input value={paste.ssoSessionId} onChange={event => setPaste({ ...paste, ssoSessionId: event.target.value })} placeholder="astron-session.json 的 ssoSessionId" />
-                    </Field>
-                    <Field label="accountId">
-                      <Input value={paste.accountId} onChange={event => setPaste({ ...paste, accountId: event.target.value })} placeholder="astron-session.json 的 accountId" />
-                    </Field>
-                    <Field label="uid" hint="可留空，导入时会尝试从 userInfo 补齐">
-                      <Input value={paste.uid} onChange={event => setPaste({ ...paste, uid: event.target.value })} placeholder="uid" />
-                    </Field>
-                    <Field label="手机号（可选）">
-                      <Input value={paste.mobile} onChange={event => setPaste({ ...paste, mobile: event.target.value })} placeholder="13800138000" />
-                    </Field>
-                    <Field label="modelBearerToken（可选）">
-                      <Input value={paste.modelBearerToken} onChange={event => setPaste({ ...paste, modelBearerToken: event.target.value })} placeholder="32位hex:base64" />
-                    </Field>
+                    {(providersQuery.data?.providers.find(provider => provider.id === providerId)?.credentialDescriptors ?? []).map(descriptor => (
+                      <Field key={descriptor.field} label={descriptor.label + (descriptor.required ? '' : '（可选）')} hint={descriptor.hint}>
+                        <Input
+                          type={descriptor.secret ? 'password' : 'text'}
+                          value={pasteFields[descriptor.field] ?? ''}
+                          onChange={event => setPasteFields(current => ({ ...current, [descriptor.field]: event.target.value }))}
+                          placeholder={descriptor.hint}
+                        />
+                      </Field>
+                    ))}
                     <div className="span-2">
                       <Field label="账号备注名（可选）">
-                        <Input value={paste.name} onChange={event => setPaste({ ...paste, name: event.target.value })} placeholder="例如：主账号" />
+                        <Input value={pasteName} onChange={event => setPasteName(event.target.value)} placeholder="例如：主账号" />
                       </Field>
                     </div>
                   </div>

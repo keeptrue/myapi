@@ -76,6 +76,15 @@ export const api = {
 
 export interface AccountDto extends AccountPublic {}
 
+/** One field of a provider's paste-credential form, rendered verbatim by the console. */
+export interface CredentialFieldDescriptor {
+  field: string
+  label: string
+  hint: string
+  secret: boolean
+  required: boolean
+}
+
 /** Provider roster as the console sees it: identity, capability bits and account counts. */
 export interface ProviderDto {
   id: string
@@ -93,6 +102,7 @@ export interface ProviderDto {
     benefits: boolean
     keepalive: boolean
   }
+  credentialDescriptors: CredentialFieldDescriptor[]
   accounts: number
   enabledAccounts: number
 }
@@ -181,6 +191,23 @@ export const endpoints = {
 
   keys: () => api.get<{ keys: KeyDto[] }>('/api/keys'),
   providers: () => api.get<{ providers: ProviderDto[] }>('/api/providers'),
+
+  /** Provider-dispatched SMS login: the send step returns a ticket when the upstream
+   *  binds the code to a session id, and the verify step echoes it back. */
+  providerSmsSend: (providerId: string, payload: { mobile: string; challenge?: string; validate?: string; seccode?: string }) =>
+    api.post<{ ok: boolean; ticket?: string }>(`/api/providers/${encodeURIComponent(providerId)}/sms/send`, {
+      mobile: payload.mobile,
+      ...(payload.challenge === undefined ? {} : { geetest_challenge: payload.challenge }),
+      ...(payload.validate === undefined ? {} : { geetest_validate: payload.validate }),
+      ...(payload.seccode === undefined ? {} : { geetest_seccode: payload.seccode }),
+    }),
+  providerSmsVerify: (providerId: string, payload: { mobile: string; code: string; ticket?: string }) =>
+    api.post<{ account: AccountDto; is_new: boolean }>(`/api/providers/${encodeURIComponent(providerId)}/sms/verify`, payload),
+  providerPaste: (providerId: string, fields: Record<string, string>, label?: string) =>
+    api.post<{ account: AccountDto; is_new: boolean }>(`/api/providers/${encodeURIComponent(providerId)}/paste`, {
+      fields,
+      ...(label === undefined || label === '' ? {} : { label }),
+    }),
 
   oauthRedirect: () => api.get<{ redirectUri: string; ttlSeconds: number }>('/api/oauth/status'),
   oauthStart: (providerId: string) =>
