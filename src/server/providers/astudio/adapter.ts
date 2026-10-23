@@ -96,6 +96,7 @@ export class AStudioAdapter implements ProviderAdapter {
 
   /** AStudio authenticates by phone + SMS, not by a browser authorization round-trip. */
   startWebLogin(): Promise<WebLoginSession> {
+    // The gateway's stateId and redirectUri are accepted and deliberately unused.
     return Promise.reject(new UnsupportedProviderError(this.id, '网页授权登录'))
   }
 

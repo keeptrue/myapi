@@ -14,6 +14,8 @@ import { registerUsageRoutes } from './routes/usage.js'
 import { registerSettingsRoutes } from './routes/settings.js'
 import { registerV1Routes } from './routes/v1.js'
 import { registerHealthRoutes } from './routes/health.js'
+import { registerProviderRoutes } from './routes/providers.js'
+import { registerOauthRoutes } from './routes/oauth.js'
 import { logger as rootLogger } from './logger.js'
 
 export interface BuildAppOptions {
@@ -71,6 +73,8 @@ export async function buildApp(services: Services, options: BuildAppOptions = {}
   })
 
   registerHealthRoutes(app, services)
+  registerProviderRoutes(app, services)
+  registerOauthRoutes(app, services)
   registerAuthRoutes(app, services)
   registerAccountRoutes(app, services)
   registerKeyRoutes(app, services)

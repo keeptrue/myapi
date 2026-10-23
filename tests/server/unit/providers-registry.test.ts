@@ -5,6 +5,17 @@ import { emptyCapabilities } from '../../../src/shared/providers.js'
 import type { StoredAccount } from '../../../src/server/store/schema.js'
 import { randomId } from '../../../src/server/util.js'
 
+const UPSTREAM = {
+  upstreamBase: '',
+  modelsBase: '',
+  workspaceBase: '',
+  studioVersion: '',
+  clientType: '',
+  requestTimeoutSeconds: 300,
+  maxBodyMb: 32,
+  maxConcurrency: 8,
+}
+
 function account(providerId: string): StoredAccount {
   return {
     id: randomId('acc'),
@@ -116,15 +127,16 @@ describe('provider registry', () => {
 
   it('surfaces an unsupported flow as UnsupportedProviderError, not as a crash', async () => {
     const adapter = fakeAdapter('astudio')
-    await expect(adapter.startWebLogin({ config: { upstreamBase: '', modelsBase: '', workspaceBase: '', studioVersion: '', clientType: '', requestTimeoutSeconds: 300, maxBodyMb: 32, maxConcurrency: 8 } })).rejects.toBeInstanceOf(UnsupportedProviderError)
+    await expect(adapter.startWebLogin(
+      { stateId: 'st-1', redirectUri: 'http://127.0.0.1:8787/oauth/callback' },
+      { config: UPSTREAM },
+    )).rejects.toBeInstanceOf(UnsupportedProviderError)
   })
 
   it('lets an adapter omit the optional renewal hook and still be usable', async () => {
     const adapter = fakeAdapter('astudio')
     expect(adapter.needsCredentialRefresh?.(account('astudio'))).toBeUndefined()
-    await expect(adapter.refreshCredential(account('astudio'), {
-      config: { upstreamBase: '', modelsBase: '', workspaceBase: '', studioVersion: '', clientType: '', requestTimeoutSeconds: 300, maxBodyMb: 32, maxConcurrency: 8 },
-    })).resolves.toBeUndefined()
+    await expect(adapter.refreshCredential(account('astudio'), { config: UPSTREAM })).resolves.toBeUndefined()
   })
 
   it('exposes the adapter context builder with the gateway limits', () => {

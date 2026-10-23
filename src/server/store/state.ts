@@ -1,9 +1,11 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ApiKeyPublic, ProbeRecord, ProbeUsage, Settings } from '../../shared/types.js'
 import { MAX_ACCOUNT_COOLDOWN_SECONDS, PROBE_MAX_RECORDS } from '../../shared/constants.js'
 import { hashPassword } from '../crypto/password.js'
+import { credentialsAad, seal } from '../crypto/secretbox.js'
+import type { AccountDraft } from '../../shared/providers.js'
 import { truncate } from '../util.js'
 import { ensureDir, readJsonFile, writeFileAtomic } from './atomic.js'
 import { migrateV1State, type V1State } from '../providers/migration.js'
@@ -85,6 +87,50 @@ export class StateStore {
   findAccountByAccountId(accountId: string): StoredAccount | undefined {
     if (accountId === '') return undefined
     return this.state.accounts.find(account => stringField(account.profile, 'accountId') === accountId)
+  }
+
+  /**
+   * Persist an adapter-produced draft.
+   *
+   * Provider-agnostic by design: the draft already carries the provider id, the credential map
+   * and the profile, so sealing and upserting need no vendor knowledge.
+   */
+  /**
+   * Find an account by its vendor-side account id.
+   *
+   * v2 keeps that id inside the adapter-owned `profile`, so the lookup reads the field without
+   * interpreting it. Used to keep an imported account stable across restarts.
+   */
+  findByAccountId(accountId: string): StoredAccount | undefined {
+    if (accountId === '') return undefined
+    return this.state.accounts.find(account => stringField(account.profile, 'accountId') === accountId)
+  }
+
+  upsertDraft(draft: AccountDraft): StoredAccount {
+    const existing = this.findByAccountId(stringField(draft.profile, 'accountId'))
+    const id = existing?.id ?? randomUUID()
+    const credentials: Record<string, string> = {}
+    for (const [field, value] of Object.entries(draft.credentials)) {
+      if (typeof value === 'string' && value !== '') credentials[field] = value
+    }
+    return this.upsertAccount({
+      id,
+      providerId: draft.providerId,
+      label: draft.label,
+      credentialKind: draft.credentialKind,
+      enabled: true,
+      sessionOk: Object.keys(credentials).length > 0,
+      statusNote: '',
+      lastError: '',
+      lastUsedAt: 0,
+      cooldownUntil: 0,
+      successes: 0,
+      failures: 0,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+      credentialsEnc: seal(JSON.stringify(credentials), credentialsAad(id, draft.providerId), this.masterKey),
+      profile: { ...(existing?.profile ?? {}), ...draft.profile },
+    })
   }
 
   upsertAccount(account: StoredAccount): StoredAccount {

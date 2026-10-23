@@ -9,6 +9,7 @@ import { CatalogService } from './providers/astudio/catalog.js'
 import { AstronClient } from './providers/astudio/client.js'
 import { ProviderRegistry } from './providers/registry.js'
 import { UnifiedCatalog } from './providers/catalog.js'
+import { OauthStore } from './providers/oauth.js'
 import { ModelsDevService } from './modelsdev/service.js'
 import { ProbeService } from './models/probe.js'
 import type { ModelsDevSnapshot } from './modelsdev/types.js'
@@ -33,6 +34,8 @@ export interface Services {
   registry: ProviderRegistry
   /** Provider-agnostic catalog consumed by the gateway and `/v1/models`. */
   catalog: UnifiedCatalog
+  /** Pending browser authorization round-trips. Ephemeral by design. */
+  oauth: OauthStore
   client: AstronApi
   accounts: AccountService
   /** AStudio-specific catalog, still used by the console's model page and the probe panel. */
@@ -88,6 +91,7 @@ export async function createServices(config: AppConfig, options: CreateServicesO
   const astudioCatalog = new CatalogService(store, client, accounts, config.dataDir)
   await astudioCatalog.load()
 
+  const oauth = new OauthStore()
   const registry = new ProviderRegistry()
   registry.register(new AStudioAdapter(accounts, astudioCatalog, client, store))
 
@@ -123,6 +127,7 @@ export async function createServices(config: AppConfig, options: CreateServicesO
     benefits,
     registry,
     catalog,
+    oauth,
     client,
     accounts,
     astudioCatalog,

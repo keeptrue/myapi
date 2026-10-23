@@ -86,8 +86,13 @@ export interface ProviderAdapter {
   /** Validate and accept credentials read from a locally installed client. */
   addByImport(input: ImportInput, context: AdapterContext): Promise<AccountDraft>
 
-  /** Begin a browser authorization round-trip. */
-  startWebLogin(context: AdapterContext): Promise<WebLoginSession>
+  /**
+   * Begin a browser authorization round-trip.
+   *
+   * `stateId` is the gateway's single-use token and must be sent to the provider as its `state`
+   * parameter; `redirectUri` is where the provider sends the human's browser back to.
+   */
+  startWebLogin(input: { stateId: string; redirectUri: string }, context: AdapterContext): Promise<WebLoginSession>
 
   /** Finish a browser authorization round-trip, from either the callback or a pasted URL. */
   completeWebLogin(input: WebLoginCompleteInput, context: AdapterContext): Promise<AccountDraft>
