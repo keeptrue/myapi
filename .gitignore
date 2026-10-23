@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# local runtime state: contains account credentials and API keys
+data/
+!.gitkeep
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+*.local.json
+*.creds.json
+*.pem
+*.key
+
+# logs / OS / editor
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# test output
+coverage/
+playwright-report/

@@ -1,0 +1,39 @@
+# myapi — 独立 AStudio 多账号网关
+#
+# 启动：   docker compose up -d --build
+# 日志：   docker compose logs -f
+# 控制台： http://127.0.0.1:8787/
+#
+# 默认只绑定回环地址。需要局域网访问时，把 ports 改成 "8787:8787"，
+# 并确保已经设置了强面板密码。
+services:
+  myapi:
+    image: ghcr.io/zhuchunshu/myapi:latest
+    build:
+      context: .
+    container_name: myapi
+    restart: unless-stopped
+    user: "${PUID:-0}:${PGID:-0}"
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8787
+      - MYAPI_DATA_DIR=/data
+      # 留空则首次启动生成随机密码并打印在日志中。
+      - MYAPI_ADMIN_PASSWORD=${MYAPI_ADMIN_PASSWORD:-}
+      # 可选：base64 编码的 32 字节主密钥；不设置则 /data/secret.key 自动生成。
+      - MYAPI_SECRET_KEY=${MYAPI_SECRET_KEY:-}
+      - TZ=Asia/Shanghai
+    volumes:
+      # 含账号凭据、密钥、日志与主密钥，必须持久化并妥善备份。
+      - ./data:/data
+
+  # 可选：Watchtower 自动更新
+  # watchtower:
+  #   image: containrrr/watchtower:latest
+  #   container_name: myapi-watchtower
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   command: --interval 86400 --cleanup myapi
