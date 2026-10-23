@@ -1,11 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto'
-import type { AccountPublic, AccountSource, AccountTestResult, CheckinResult, ImportAccountInput, ImportFileInput } from '../../shared/types.js'
-import { PROBE_TIMEOUT_MS } from '../../shared/constants.js'
-import { open, seal, secretBoxAad } from '../crypto/secretbox.js'
-import { logger as rootLogger } from '../logger.js'
-import type { StateStore } from '../store/state.js'
-import type { StoredAccount } from '../store/schema.js'
-import type { BenefitStore } from '../store/logs.js'
+import type {
+  AccountDraft,
+  AccountProfilePublic,
+  AccountTestResult,
+  ClaimItem,
+  ClaimResult,
+  CheckinResult,
+  ProviderCapabilities,
+} from '../../../shared/providers.js'
+import type { AccountPublic, SecretBox, Settings } from '../../../shared/types.js'
+import { PROBE_TIMEOUT_MS } from '../../../shared/constants.js'
+import { credentialsAad, open, seal } from '../../crypto/secretbox.js'
+import { logger as rootLogger } from '../../logger.js'
+import type { StateStore } from '../../store/state.js'
+import type { StoredAccount } from '../../store/schema.js'
+import type { BenefitStore } from '../../store/logs.js'
 import { parseAstronSession, parseConfigToml, sessionValid } from './session.js'
 import {
   AstronError,
@@ -15,9 +24,31 @@ import {
   type LoginResult,
   type PointsBalance,
 } from './types.js'
-import { localDayKey, normalizeUid, truncate } from '../util.js'
+import { localDayKey, normalizeUid, truncate } from '../../util.js'
+import { isRecord } from '../../util.js'
+import { ASTRO_PROVIDER_ID } from '../ids.js'
 
 const CLAIMABLE_POPUPS = new Set(['DAILY_REWARD_DIALOG', 'NEW_USER_DIALOG', 'CLIENT_DOWNLOAD_REWARD_DIALOG'])
+
+/** Display name of the provider, used where a human-readable label is required. */
+export const ASTRO_PROVIDER_NAME = 'AStudio'
+
+/**
+ * Capabilities AStudio actually implements. The console renders actions from these bits and
+ * the scheduler skips work for flags that are false, so nothing here may be optimistic.
+ */
+export const ASTRO_CAPABILITIES: ProviderCapabilities = {
+  smsLogin: true,
+  webLogin: false,
+  pasteCredential: true,
+  importFromClient: true,
+  tokenRenew: true,
+  catalogRefresh: true,
+  balanceQuery: true,
+  checkin: true,
+  benefits: true,
+  keepalive: true,
+}
 
 function emptyPoints(): PointsBalance {
   return {
@@ -33,7 +64,8 @@ function emptyPoints(): PointsBalance {
   }
 }
 
-function maskMobile(mobile: string): string {
+/** Mask a phone number for display: `138****8000`. Never returns the full number. */
+export function maskMobile(mobile: string): string {
   const value = mobile.trim()
   if (/^\d{11}$/u.test(value)) return `${value.slice(0, 3)}****${value.slice(-4)}`
   if (value.length > 6) return `${value.slice(0, 3)}***${value.slice(-2)}`
@@ -44,7 +76,80 @@ function localId(seed: string): string {
   return `local_${createHash('sha256').update(seed).digest('hex').slice(0, 16)}`
 }
 
-/** Account persistence, credential refresh, status and benefits. */
+/** Read one non-secret profile field as a string. */
+export function profileString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+/** Read one non-secret profile field as a finite number. */
+export function profileNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+/** Read one non-secret profile field as a boolean. */
+export function profileBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+export interface DecodedCredentials {
+  map: Record<string, string>
+  /** False when the blob is missing, tampered or not JSON. */
+  ok: boolean
+}
+
+/**
+ * Decode an account's credential blob. The blob is one AES-256-GCM `SecretBox` whose AAD binds
+ * it to `id + providerId`, so a ciphertext can never be replayed against another provider.
+ * A failure never throws: the caller decides whether to mark the session dead.
+ */
+export function decodeCredentials(account: StoredAccount, key: Buffer): DecodedCredentials {
+  const raw = open(account.credentialsEnc, credentialsAad(account.id, account.providerId), key)
+  if (raw === undefined) return { map: {}, ok: false }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed)) return { map: {}, ok: false }
+    const map: Record<string, string> = {}
+    for (const [field, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') map[field] = value
+    }
+    return { map, ok: true }
+  } catch {
+    return { map: {}, ok: false }
+  }
+}
+
+/** Re-seal a credential map with the provider-bound AAD. */
+export function encodeCredentials(
+  account: Pick<StoredAccount, 'id' | 'providerId'>,
+  map: Record<string, string>,
+  key: Buffer,
+): SecretBox {
+  return seal(JSON.stringify(map), credentialsAad(account.id, account.providerId), key)
+}
+
+/** Shape accepted by the legacy `importPaste` route handler. */
+export interface LegacyPasteInput {
+  name?: unknown
+  token?: unknown
+  ssoSessionId?: unknown
+  modelBearerToken?: unknown
+  accountId?: unknown
+  uid?: unknown
+  mobile?: unknown
+}
+
+/** Shape accepted by the legacy `importFile` route handler. */
+export interface LegacyImportFileInput {
+  name?: unknown
+  configToml?: unknown
+  sessionJson?: unknown
+}
+
+/** Account persistence, credential refresh, status and benefits for AStudio. */
 export class AccountService {
   private readonly log = rootLogger.child({ module: 'accounts' })
 
@@ -55,36 +160,94 @@ export class AccountService {
     private readonly benefits: BenefitStore,
   ) {}
 
-  private sealFor(accountId: string, field: string, value: string | undefined): ReturnType<typeof seal> | undefined {
-    if (value === undefined || value.trim() === '') return undefined
-    return seal(value.trim(), secretBoxAad(accountId, field), this.masterKey)
+  // ---- credential blob helpers ----
+
+  /** Decode the blob without touching the store. */
+  credentialMap(account: StoredAccount): Record<string, string> {
+    return decodeCredentials(account, this.masterKey).map
   }
 
-  private openFor(account: StoredAccount, field: string, box: StoredAccount['tokenEnc']): string {
-    const value = open(box, secretBoxAad(account.id, field), this.masterKey)
-    return value ?? ''
+  /** Re-seal and persist a mutated credential map. */
+  writeCredentialMap(account: StoredAccount, map: Record<string, string>): StoredAccount | undefined {
+    const cleaned: Record<string, string> = {}
+    for (const [field, value] of Object.entries(map)) {
+      if (typeof value === 'string' && value !== '') cleaned[field] = value
+    }
+    return this.store.updateAccount(account.id, {
+      credentialsEnc: encodeCredentials(account, cleaned, this.masterKey),
+      sessionOk: Object.keys(cleaned).length > 0,
+    })
   }
+
+  /** Flag an account whose credential blob cannot be decrypted. */
+  markSessionFailure(account: StoredAccount): void {
+    if (!account.sessionOk) return
+    this.store.updateAccount(account.id, { sessionOk: false, statusNote: '凭据无法解密，请重新导入' })
+  }
+
+  /**
+   * Merge a patch into the stored `profile`.
+   *
+   * Vendor state lives in `profile` in v2, so claim timestamps and similar fields must be
+   * written through a fresh read — a stale `account.profile` would revert concurrent updates.
+   */
+  touchProfile(id: string, patch: Record<string, unknown>): void {
+    const current = this.store.account(id)
+    if (current === undefined) return
+    this.store.updateAccount(id, { profile: { ...current.profile, ...patch } })
+  }
+
+  // ---- session ----
 
   sessionFor(account: StoredAccount): AstronSession {
+    const decoded = decodeCredentials(account, this.masterKey)
+    if (!decoded.ok) this.markSessionFailure(account)
+    const map = decoded.map
     return {
-      accountId: account.accountId,
-      uid: account.uid,
-      token: this.openFor(account, 'token', account.tokenEnc),
-      ssoSessionId: this.openFor(account, 'ssoSession', account.ssoSessionEnc),
-      modelBearerToken: this.openFor(account, 'modelBearer', account.modelBearerEnc),
+      accountId: profileString(account.profile['accountId']),
+      uid: profileString(account.profile['uid']),
+      token: map['token'] ?? '',
+      ssoSessionId: map['ssoSession'] ?? '',
+      modelBearerToken: map['modelBearer'] ?? '',
+    }
+  }
+
+  // ---- presentation ----
+
+  toPublicProfile(account: StoredAccount): AccountProfilePublic {
+    const profile = account.profile
+    const creds = this.credentialMap(account)
+    const mobile = creds['mobile'] ?? ''
+    const pointsKnown = profileBoolean(profile['pointsKnown'])
+    const planCode = profileString(profile['planCode'])
+    return {
+      nickname: profileString(profile['nickname']),
+      mobileMasked: maskMobile(mobile),
+      balances: [
+        { key: 'points', label: '通用积分', value: profileNumber(profile['pointsBalance']), unit: '', known: pointsKnown },
+        { key: 'spark', label: 'Spark 积分', value: profileNumber(profile['sparkBalance']), unit: '', known: pointsKnown },
+      ],
+      plans: planCode === ''
+        ? []
+        : [{ code: planCode, name: profileString(profile['planName']), active: profileBoolean(profile['planActive']) }],
+      pendingClaims: profileNumber(profile['pendingPopups']),
+      lastCheckedAt: profileNumber(profile['lastCheckedAt']),
+      lastClaimAt: profileNumber(profile['lastClaimAt']),
+      extra: {
+        accountId: profileString(profile['accountId']),
+        uid: profileString(profile['uid']),
+        domainAccount: profileString(profile['domainAccount']),
+      },
     }
   }
 
   toPublic(account: StoredAccount): AccountPublic {
     return {
       id: account.id,
-      name: account.name,
-      accountId: account.accountId,
-      uid: account.uid,
-      mobileMasked: maskMobile(account.mobile),
-      nickname: account.nickname,
-      domainAccount: account.domainAccount,
-      source: account.source,
+      providerId: account.providerId,
+      providerName: ASTRO_PROVIDER_NAME,
+      label: account.label,
+      credentialKind: account.credentialKind,
       enabled: account.enabled,
       sessionOk: account.sessionOk,
       statusNote: account.statusNote,
@@ -93,21 +256,10 @@ export class AccountService {
       cooldownUntil: account.cooldownUntil,
       successes: account.successes,
       failures: account.failures,
-      pointsKnown: account.pointsKnown,
-      pointsBalance: account.pointsBalance,
-      sparkBalance: account.sparkBalance,
-      planCode: account.planCode,
-      planName: account.planName,
-      planActive: account.planActive,
-      pendingPopups: account.pendingPopups,
-      lastCheckedAt: account.lastCheckedAt,
-      lastClaimAt: account.lastClaimAt,
       createdAt: account.createdAt,
       updatedAt: account.updatedAt,
-      credentials: {
-        cookie: account.tokenEnc !== undefined,
-        modelBearer: account.modelBearerEnc !== undefined,
-      },
+      capabilities: ASTRO_CAPABILITIES,
+      profile: this.toPublicProfile(account),
     }
   }
 
@@ -119,105 +271,111 @@ export class AccountService {
     return this.store.account(id)
   }
 
-  private async persist(input: {
-    id?: string
-    name: string
-    accountId: string
-    uid: string
-    token?: string
-    ssoSessionId?: string
-    modelBearerToken?: string
-    mobile: string
-    nickname: string
-    source: AccountSource
-    sessionOk: boolean
-    statusNote?: string
-  }): Promise<StoredAccount> {
-    const existing = input.accountId !== ''
-      ? this.store.findAccountByAccountId(input.accountId)
-      : input.id === undefined ? undefined : this.store.account(input.id)
-    const seed = input.token !== undefined && input.token !== ''
-      ? input.token
-      : input.modelBearerToken !== undefined && input.modelBearerToken !== ''
-        ? input.modelBearerToken
-        : randomUUID()
-    const id = existing?.id ?? input.id ?? (input.accountId === '' ? localId(seed) : randomUUID())
+  /**
+   * v2 dedupes on `id` only, so the upstream-account lookup has to scan `profile.accountId`.
+   * Used to keep a re-import from creating a second row for the same upstream account.
+   */
+  findByAccountId(accountId: string): StoredAccount | undefined {
+    if (accountId === '') return undefined
+    return this.store.accounts.find(account => profileString(account.profile['accountId']) === accountId)
+  }
+
+  // ---- persistence ----
+
+  /** Persist an adapter-produced draft, sealing its credentials into one provider-bound blob. */
+  saveDraft(draft: AccountDraft): StoredAccount {
+    const profileAccountId = profileString(draft.profile['accountId'])
+    const existing = profileAccountId === '' ? undefined : this.findByAccountId(profileAccountId)
+    const id = existing?.id ?? randomUUID()
+
+    const credentials: Record<string, string> = {}
+    for (const [field, value] of Object.entries(draft.credentials)) {
+      if (typeof value === 'string' && value !== '') credentials[field] = value
+    }
+
+    const profile: Record<string, unknown> = { ...(existing?.profile ?? {}), ...draft.profile }
+    const nickname = profileString(profile['nickname'])
+    if (nickname === '' && draft.nickname !== '') profile['nickname'] = draft.nickname
+    const mobile = credentials['mobile'] ?? ''
+    const label = draft.label.trim() !== ''
+      ? draft.label.trim()
+      : (nickname || mobile || profileAccountId || `${ASTRO_PROVIDER_NAME} account`)
     const now = Date.now()
+    const hasCredentials = Object.keys(credentials).length > 0
+
     const account: StoredAccount = {
       id,
-      name: input.name.trim() !== '' ? input.name.trim() : (input.nickname || input.mobile || input.accountId || 'AStudio account'),
-      accountId: input.accountId,
-      uid: normalizeUid(input.uid),
-      mobile: input.mobile,
-      nickname: input.nickname,
-      domainAccount: existing?.domainAccount ?? '',
-      source: input.source,
+      providerId: ASTRO_PROVIDER_ID,
+      label,
+      credentialKind: draft.credentialKind,
       enabled: existing?.enabled ?? true,
-      sessionOk: input.sessionOk,
-      statusNote: input.statusNote ?? '',
-      lastError: '',
+      sessionOk: hasCredentials && (existing?.sessionOk ?? true),
+      statusNote: hasCredentials ? (existing?.statusNote ?? '') : '凭据为空，请重新导入',
+      lastError: existing?.lastError ?? '',
       lastUsedAt: existing?.lastUsedAt ?? 0,
-      cooldownUntil: 0,
+      cooldownUntil: existing?.cooldownUntil ?? 0,
       successes: existing?.successes ?? 0,
       failures: existing?.failures ?? 0,
-      pointsKnown: existing?.pointsKnown ?? false,
-      pointsBalance: existing?.pointsBalance ?? 0,
-      sparkBalance: existing?.sparkBalance ?? 0,
-      planCode: existing?.planCode ?? '',
-      planName: existing?.planName ?? '',
-      planActive: existing?.planActive ?? false,
-      pendingPopups: existing?.pendingPopups ?? 0,
-      lastCheckedAt: existing?.lastCheckedAt ?? 0,
-      lastClaimAt: existing?.lastClaimAt ?? 0,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-      ...(() => {
-        const box = this.sealFor(id, 'token', input.token)
-        return box === undefined ? {} : { tokenEnc: box }
-      })(),
-      ...(() => {
-        const box = this.sealFor(id, 'ssoSession', input.ssoSessionId)
-        return box === undefined ? {} : { ssoSessionEnc: box }
-      })(),
-      ...(() => {
-        const box = this.sealFor(id, 'modelBearer', input.modelBearerToken)
-        return box === undefined ? {} : { modelBearerEnc: box }
-      })(),
+      credentialsEnc: encodeCredentials({ id, providerId: ASTRO_PROVIDER_ID }, credentials, this.masterKey),
+      profile,
     }
     return this.store.upsertAccount(account)
   }
 
-  async fromLogin(result: LoginResult): Promise<StoredAccount> {
-    const account = await this.persist({
-      name: result.nickname || result.mobile || result.accountId,
-      accountId: result.accountId,
-      uid: result.uid,
-      token: result.token,
-      ssoSessionId: result.ssoSessionId,
-      modelBearerToken: result.modelBearerToken,
-      mobile: result.mobile,
+  // ---- onboarding ----
+
+  /** Turn an SMS login result into an account draft. */
+  draftFromLogin(result: LoginResult): AccountDraft {
+    const credentials: Record<string, string> = {}
+    if (result.token !== '') credentials['token'] = result.token
+    if (result.ssoSessionId !== '') credentials['ssoSession'] = result.ssoSessionId
+    if (result.modelBearerToken !== '') credentials['modelBearer'] = result.modelBearerToken
+    if (result.mobile !== '') credentials['mobile'] = result.mobile
+    return {
+      providerId: ASTRO_PROVIDER_ID,
+      label: result.nickname || result.mobile || result.accountId,
+      credentialKind: 'sms',
+      credentials,
+      profile: {
+        accountId: result.accountId,
+        uid: normalizeUid(result.uid),
+        nickname: result.nickname,
+        domainAccount: '',
+        pointsKnown: false,
+        pointsBalance: 0,
+        sparkBalance: 0,
+        planCode: '',
+        planName: '',
+        planActive: false,
+        pendingPopups: 0,
+        lastCheckedAt: 0,
+        lastClaimAt: 0,
+      },
       nickname: result.nickname,
-      source: 'sms-login',
-      sessionOk: true,
-    })
-    await this.record(account, '手机号登录', 'ok', `accountId=${result.accountId}${result.isNew ? '（新账号）' : ''}`)
-    void this.refreshStatus(account.id).catch(() => undefined)
-    return account
+      mobileMasked: maskMobile(result.mobile),
+    }
   }
 
-  async importPaste(input: ImportAccountInput): Promise<StoredAccount> {
-    const token = input.token?.trim() ?? ''
-    const sso = input.ssoSessionId?.trim() ?? ''
-    const bearerInput = input.modelBearerToken?.trim() ?? ''
-    const accountId = input.accountId?.trim() ?? ''
-    const uid = input.uid?.trim() ?? ''
-    const mobile = input.mobile?.trim() ?? ''
+  /**
+   * Validate pasted fields (adapter-owned names) and build a draft. Unknown fields are rejected
+   * by the adapter before they reach here; this method only interprets known names.
+   */
+  async buildPasteDraft(fields: Record<string, string>, label?: string): Promise<AccountDraft> {
+    const token = (fields['token'] ?? '').trim()
+    const sso = (fields['ssoSession'] ?? '').trim()
+    const bearerInput = (fields['modelBearer'] ?? '').trim()
+    const accountId = (fields['accountId'] ?? '').trim()
+    const uid = (fields['uid'] ?? '').trim()
+    const mobile = (fields['mobile'] ?? '').trim()
     if (token === '' && sso === '' && bearerInput === '') {
       throw new Error('至少需要 chat token、ssoSessionId 或 modelBearerToken 之一')
     }
     let bearer = bearerInput
     let resolvedUid = uid
     let resolvedMobile = mobile
+    let nickname = ''
     let sessionOk = false
     let statusNote = ''
     if (token !== '' || sso !== '') {
@@ -233,57 +391,108 @@ export class AccountService {
           const info = await this.client.fetchUserInfo(session)
           resolvedUid = resolvedUid || info.uid
           resolvedMobile = resolvedMobile || info.mobile
+          nickname = nickname || info.nickname
           const credentials = await this.client.fetchModelConfigs(session)
           bearer = bearer || credentials.bearer
           sessionOk = true
         }
       } catch (error: unknown) {
-        if (isSessionExpired(error)) {
-          statusNote = '会话已失效，请重新登录'
-        } else {
-          statusNote = truncate(error instanceof Error ? error.message : String(error), 200)
-        }
+        statusNote = isSessionExpired(error) ? '会话已失效，请重新登录' : truncate(messageOf(error), 200)
       }
     }
     if (bearer === '' && !sessionOk) {
       throw new Error(statusNote !== '' ? `导入失败：${statusNote}` : '未能取得模型凭据')
     }
-    const account = await this.persist({
-      ...(accountId === '' ? { id: localId(token || sso || bearer) } : {}),
-      name: input.name ?? '',
-      accountId,
-      uid: resolvedUid,
-      token,
-      ssoSessionId: sso,
-      modelBearerToken: bearer,
-      mobile: resolvedMobile,
-      nickname: '',
-      source: sessionOk ? 'paste' : 'model-only',
-      sessionOk,
-      statusNote,
-    })
-    await this.record(account, '导入账号', 'ok', sessionOk ? 'cookie + bearer' : '仅模型凭据')
-    if (sessionOk) void this.refreshStatus(account.id).catch(() => undefined)
+    const credentials: Record<string, string> = {}
+    if (token !== '') credentials['token'] = token
+    if (sso !== '') credentials['ssoSession'] = sso
+    if (bearer !== '') credentials['modelBearer'] = bearer
+    if (resolvedMobile !== '') credentials['mobile'] = resolvedMobile
+    return {
+      providerId: ASTRO_PROVIDER_ID,
+      label: label?.trim() ?? '',
+      credentialKind: sessionOk ? 'paste' : 'bearer-only',
+      credentials,
+      profile: {
+        accountId,
+        uid: normalizeUid(resolvedUid),
+        nickname,
+        domainAccount: '',
+        pointsKnown: false,
+        pointsBalance: 0,
+        sparkBalance: 0,
+        planCode: '',
+        planName: '',
+        planActive: false,
+        pendingPopups: 0,
+        lastCheckedAt: 0,
+        lastClaimAt: 0,
+      },
+      nickname,
+      mobileMasked: maskMobile(resolvedMobile),
+    }
+  }
+
+  /** Read a locally installed client's config.toml + astron-session.json into a draft. */
+  async buildImportDraft(
+    files: { field: string; name: string; content: string }[],
+    label?: string,
+  ): Promise<AccountDraft> {
+    const byField = new Map<string, string>()
+    for (const file of files) byField.set(file.field, file.content)
+    const configText = byField.get('configToml')
+    const parsedConfig = configText === undefined ? { bearer: '', uid: '' } : parseConfigToml(configText)
+    let session: ReturnType<typeof parseAstronSession> = { mobile: '', nickname: '' }
+    const sessionText = byField.get('sessionJson')
+    if (sessionText !== undefined && sessionText.trim() !== '') session = parseAstronSession(sessionText)
+    const draft = await this.buildPasteDraft({
+      token: session.token ?? '',
+      ssoSession: session.ssoSessionId ?? '',
+      accountId: session.accountId ?? '',
+      uid: session.uid ?? parsedConfig.uid,
+      mobile: session.mobile ?? '',
+      modelBearer: session.modelBearerToken ?? parsedConfig.bearer,
+    }, label)
+    return { ...draft, credentialKind: 'client-import' }
+  }
+
+  /** Legacy onboarding path: build a draft from pasted fields, then persist it. */
+  async importPaste(input: LegacyPasteInput): Promise<StoredAccount> {
+    const draft = await this.buildPasteDraft({
+      token: asString(input.token),
+      ssoSession: asString(input.ssoSessionId),
+      modelBearer: asString(input.modelBearerToken),
+      accountId: asString(input.accountId),
+      uid: asString(input.uid),
+      mobile: asString(input.mobile),
+    }, asString(input.name))
+    const account = this.saveDraft(draft)
+    await this.record(account, '导入账号', 'ok', draft.credentialKind === 'bearer-only' ? '仅模型凭据' : 'cookie + bearer')
+    if (account.sessionOk) void this.refreshStatus(account.id).catch(() => undefined)
     return account
   }
 
-  async importFile(input: ImportFileInput): Promise<StoredAccount> {
-    const config = input.configToml === undefined ? { bearer: '', uid: '' } : parseConfigToml(input.configToml)
-    let session: ReturnType<typeof parseAstronSession> = { mobile: '', nickname: '' }
-    if (input.sessionJson !== undefined && input.sessionJson.trim() !== '') {
-      session = parseAstronSession(input.sessionJson)
-    }
-    const account = await this.importPaste({
-      token: session.token ?? '',
-      ssoSessionId: session.ssoSessionId ?? '',
-      accountId: session.accountId ?? '',
-      uid: session.uid ?? config.uid,
-      mobile: session.mobile ?? '',
-      modelBearerToken: session.modelBearerToken ?? config.bearer,
-      ...(input.name === undefined ? {} : { name: input.name }),
-    })
-    return this.store.updateAccount(account.id, { source: 'file-import' }) ?? account
+  /** Legacy onboarding path: build a draft from imported files, then persist it. */
+  async importFile(input: LegacyImportFileInput): Promise<StoredAccount> {
+    const files: { field: string; name: string; content: string }[] = []
+    if (typeof input.configToml === 'string') files.push({ field: 'configToml', name: 'config.toml', content: input.configToml })
+    if (typeof input.sessionJson === 'string') files.push({ field: 'sessionJson', name: 'astron-session.json', content: input.sessionJson })
+    const draft = await this.buildImportDraft(files, asString(input.name))
+    const account = this.saveDraft(draft)
+    await this.record(account, '导入账号', 'ok', 'client import')
+    if (account.sessionOk) void this.refreshStatus(account.id).catch(() => undefined)
+    return account
   }
+
+  /** Legacy SMS path: build a draft from a login result, then persist it. */
+  async fromLogin(result: LoginResult): Promise<StoredAccount> {
+    const account = this.saveDraft(this.draftFromLogin(result))
+    await this.record(account, '手机号登录', 'ok', `accountId=${result.accountId}${result.isNew ? '（新账号）' : ''}`)
+    void this.refreshStatus(account.id).catch(() => undefined)
+    return account
+  }
+
+  // ---- lifecycle ----
 
   async refreshCredential(id: string): Promise<StoredAccount> {
     const account = this.store.account(id)
@@ -294,18 +503,18 @@ export class AccountService {
     }
     try {
       const credentials = await this.client.fetchModelConfigs(session)
-      const updated = this.store.updateAccount(id, {
-        modelBearerEnc: seal(credentials.bearer, secretBoxAad(id, 'modelBearer'), this.masterKey),
+      const map = { ...this.credentialMap(account), modelBearer: credentials.bearer }
+      this.writeCredentialMap(account, map)
+      return this.store.updateAccount(id, {
         sessionOk: true,
         lastError: '',
         cooldownUntil: 0,
         statusNote: '',
-      })
-      return updated ?? account
+      }) ?? account
     } catch (error: unknown) {
       const expired = isSessionExpired(error)
       this.store.updateAccount(id, {
-        lastError: truncate(error instanceof Error ? error.message : String(error), 400),
+        lastError: truncate(messageOf(error), 400),
         statusNote: expired ? '会话已失效，请重新登录' : account.statusNote,
         sessionOk: expired ? false : account.sessionOk,
         cooldownUntil: Date.now() + (expired ? 300 : 60) * 1000,
@@ -333,24 +542,23 @@ export class AccountService {
       errors.push(`points: ${messageOf(points.reason)}`)
       sessionExpired ||= isSessionExpired(points.reason)
     }
-    const plan = membership.status === 'fulfilled' ? membership.value : undefined
     if (membership.status === 'rejected') errors.push(`membership: ${messageOf(membership.reason)}`)
-    const pendingCount = popups.status === 'fulfilled' ? popups.value.length : account.pendingPopups
+    const pendingCount = popups.status === 'fulfilled' ? popups.value.length : profileNumber(account.profile['pendingPopups'])
     if (popups.status === 'rejected') errors.push(`popups: ${messageOf(popups.reason)}`)
 
+    const profilePatch: Record<string, unknown> = { lastCheckedAt: Date.now(), pendingPopups: pendingCount }
+    if (points.status === 'fulfilled') {
+      profilePatch['pointsKnown'] = true
+      profilePatch['pointsBalance'] = balance.totalBalance
+      profilePatch['sparkBalance'] = balance.sparkTotalBalance
+    }
+    if (membership.status === 'fulfilled') {
+      profilePatch['planCode'] = membership.value.planCode
+      profilePatch['planName'] = membership.value.planName
+      profilePatch['planActive'] = membership.value.active
+    }
     const updated = this.store.updateAccount(id, {
-      ...(points.status === 'fulfilled' ? {
-        pointsKnown: true,
-        pointsBalance: balance.totalBalance,
-        sparkBalance: balance.sparkTotalBalance,
-      } : {}),
-      ...(plan === undefined ? {} : {
-        planCode: plan.planCode,
-        planName: plan.planName,
-        planActive: plan.active,
-      }),
-      pendingPopups: pendingCount,
-      lastCheckedAt: Date.now(),
+      profile: { ...account.profile, ...profilePatch },
       statusNote: truncate(errors.join('; '), 400),
       sessionOk: sessionExpired ? false : account.sessionOk,
     })
@@ -365,19 +573,10 @@ export class AccountService {
     if (account === undefined) throw new Error('账号不存在')
     const session = this.sessionFor(account)
     const settings = this.store.settings
-    const name = account.nickname || account.name || account.accountId
-    const result: CheckinResult = {
-      accountId: account.id,
-      name,
-      points: account.pointsBalance,
-      spark: account.sparkBalance,
-      pointsDelta: 0,
-      plan: account.planName,
-      popups: account.pendingPopups,
-      actions: [],
-      error: '',
-    }
-    const balanceBefore = account.pointsBalance + account.sparkBalance
+    const domainAccount = profileString(account.profile['domainAccount'])
+    const beforePoints = profileNumber(account.profile['pointsBalance'])
+    const beforeSpark = profileNumber(account.profile['sparkBalance'])
+    const result: CheckinResult = { ok: false, error: '', deltas: [], actions: [], at: Date.now() }
     try {
       const tenant = await this.client.initTenantApp(session)
       if (tenant.banned) {
@@ -424,13 +623,13 @@ export class AccountService {
       }
     }
 
-    if (settings.checkinClaimBeta && account.domainAccount.trim() !== '') {
+    if (settings.checkinClaimBeta && domainAccount.trim() !== '') {
       try {
         const eligibility = await this.client.betaEligibility(session)
         if (eligibility.canClaim) {
-          await this.client.claimBeta(session, account.domainAccount.trim())
+          await this.client.claimBeta(session, domainAccount.trim())
           result.actions.push('Beta 资格')
-          await this.record(account, 'Beta 领取', 'ok', account.domainAccount)
+          await this.record(account, 'Beta 领取', 'ok', domainAccount)
           await this.refreshCredential(id).catch(() => undefined)
         } else {
           await this.record(account, 'Beta 领取', 'skipped', eligibility.reason || '不具备领取资格')
@@ -442,20 +641,26 @@ export class AccountService {
 
     try {
       const refreshed = await this.refreshStatus(id)
-      result.points = refreshed.pointsBalance
-      result.spark = refreshed.sparkBalance
-      result.popups = refreshed.pendingPopups
-      result.plan = refreshed.planName
-      result.pointsDelta = refreshed.pointsBalance + refreshed.sparkBalance - balanceBefore
-      this.store.recordCheckin(id, localDayKey(), result.actions.join('、') || '已签到', result.pointsDelta)
-      this.store.updateAccount(id, { lastClaimAt: Date.now() })
-      if (result.actions.length > 0 && result.pointsDelta === 0) {
+      const afterPoints = profileNumber(refreshed.profile['pointsBalance'])
+      const afterSpark = profileNumber(refreshed.profile['sparkBalance'])
+      result.deltas = [
+        { key: 'points', label: '通用积分', value: afterPoints - beforePoints },
+        { key: 'spark', label: 'Spark 积分', value: afterSpark - beforeSpark },
+      ]
+      this.store.recordCheckin(id, localDayKey(), result.actions.join('、') || '已签到', result.deltas.reduce((sum, delta) => sum + delta.value, 0))
+      this.touchProfile(id, { lastClaimAt: Date.now() })
+      result.ok = true
+      if (result.actions.length > 0 && result.deltas.every(delta => delta.value === 0)) {
         await this.record(account, '结算', 'skipped', '调用成功但积分无变化（可能今日已领）')
       }
     } catch (error: unknown) {
       result.error = truncate(messageOf(error), 300)
     }
     return result
+  }
+
+  async checkinAll(): Promise<CheckinResult[]> {
+    return Promise.all(this.store.accounts.filter(account => account.enabled).map(account => this.checkin(account.id)))
   }
 
   async keepalive(id: string): Promise<void> {
@@ -486,14 +691,14 @@ export class AccountService {
       const text = await response.text().catch(() => '')
       const latencyMs = Date.now() - started
       if (!response.ok) {
-        return { ok: false, model, status: response.status, latencyMs, message: truncate(text, 300) || `HTTP ${response.status}` }
+        return { ok: false, model, latencyMs, message: truncate(text, 300) || `HTTP ${response.status}` }
       }
       this.store.updateAccount(id, { successes: account.successes + 1, lastUsedAt: Date.now(), lastError: '' })
-      return { ok: true, model, status: response.status, latencyMs, message: 'ok' }
+      return { ok: true, model, latencyMs, message: 'ok' }
     } catch (error: unknown) {
       const latencyMs = Date.now() - started
       this.store.updateAccount(id, { failures: account.failures + 1, lastError: truncate(messageOf(error), 300) })
-      return { ok: false, model, status: 0, latencyMs, message: truncate(messageOf(error), 300) }
+      return { ok: false, model, latencyMs, message: truncate(messageOf(error), 300) }
     }
   }
 
@@ -512,11 +717,66 @@ export class AccountService {
     }
   }
 
+  // ---- benefits ----
+
+  async claimableItems(account: StoredAccount): Promise<ClaimItem[]> {
+    const session = this.sessionFor(account)
+    const settings = this.store.settings
+    const items: ClaimItem[] = []
+    try {
+      const popups = await this.client.pendingPopups(session)
+      for (const popup of popups) {
+        if (!CLAIMABLE_POPUPS.has(popup.componentType)) continue
+        items.push({ id: `popup:${popup.popupId}`, label: popupLabel(popup.componentType), kind: 'popup' })
+      }
+    } catch (error: unknown) {
+      await this.record(account, '领取弹窗', 'failed', truncate(messageOf(error), 200))
+    }
+    if (settings.checkinClaimDownload) items.push({ id: 'download', label: '客户端下载奖励', kind: 'download' })
+    if (settings.checkinClaimBeta && profileString(account.profile['domainAccount']).trim() !== '') {
+      items.push({ id: 'beta', label: 'Beta 资格', kind: 'beta' })
+    }
+    return items
+  }
+
+  async claimItem(account: StoredAccount, item: ClaimItem): Promise<ClaimResult> {
+    const session = this.sessionFor(account)
+    try {
+      if (item.kind === 'popup') {
+        const popups = await this.client.pendingPopups(session)
+        const popup = popups.find(entry => `popup:${entry.popupId}` === item.id)
+        if (popup === undefined) return { ...item, ok: false, message: '该奖励当前不可领取' }
+        await this.client.completePopup(session, popup.popupId, popup.instanceKey)
+        this.touchProfile(account.id, { lastClaimAt: Date.now() })
+        return { ...item, ok: true, message: '领取成功' }
+      }
+      if (item.kind === 'download') {
+        await this.client.claimDownloadReward(session)
+        this.touchProfile(account.id, { lastClaimAt: Date.now() })
+        return { ...item, ok: true, message: '领取成功' }
+      }
+      if (item.kind === 'beta') {
+        const eligibility = await this.client.betaEligibility(session)
+        if (!eligibility.canClaim) return { ...item, ok: false, message: eligibility.reason || '不具备领取资格' }
+        await this.client.claimBeta(session, profileString(account.profile['domainAccount']).trim())
+        this.touchProfile(account.id, { lastClaimAt: Date.now() })
+        return { ...item, ok: true, message: '领取成功' }
+      }
+      return { ...item, ok: false, message: '未知的领取项' }
+    } catch (error: unknown) {
+      if (isAlreadyClaimed(error)) return { ...item, ok: true, message: '今日已领取' }
+      return { ...item, ok: false, message: truncate(messageOf(error), 200) }
+    }
+  }
+
+  // ---- bookkeeping ----
+
   async record(account: StoredAccount, action: string, result: 'ok' | 'failed' | 'skipped', detail: string): Promise<void> {
+    const profile = account.profile
     await this.benefits.append({
       time: Date.now(),
       accountId: account.id,
-      accountName: account.nickname || account.name || account.accountId,
+      accountName: profileString(profile['nickname']) || account.label || profileString(profile['accountId']),
       action,
       result,
       detail: truncate(detail, 400),
@@ -539,7 +799,6 @@ export class AccountService {
       cooldownUntil: Date.now() + cooldown * 1000,
     })
   }
-
 }
 
 function popupLabel(componentType: string): string {

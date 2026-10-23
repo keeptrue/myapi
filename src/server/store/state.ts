@@ -2,9 +2,11 @@ import { randomBytes } from 'node:crypto'
 import { copyFile, mkdir, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ApiKeyPublic, ProbeRecord, ProbeUsage, Settings } from '../../shared/types.js'
-import { PROBE_MAX_RECORDS } from '../../shared/constants.js'
+import { MAX_ACCOUNT_COOLDOWN_SECONDS, PROBE_MAX_RECORDS } from '../../shared/constants.js'
 import { hashPassword } from '../crypto/password.js'
+import { truncate } from '../util.js'
 import { ensureDir, readJsonFile, writeFileAtomic } from './atomic.js'
+import { migrateV1State, type V1State } from '../providers/migration.js'
 import {
   emptyState,
   type State,
@@ -31,6 +33,8 @@ export class StateStore {
   constructor(
     readonly dataDir: string,
     private readonly initialSettings: Settings,
+    /** Needed to re-seal credentials when migrating a v1 document. */
+    private readonly masterKey: Buffer,
   ) {
     this.path = join(dataDir, 'state.json')
     this.state = emptyState(initialSettings)
@@ -38,9 +42,13 @@ export class StateStore {
 
   async load(): Promise<{ generatedPassword?: string }> {
     await ensureDir(this.dataDir)
-    const raw = await readJsonFile<State>(this.path)
+    const raw = await readJsonFile<State | V1State>(this.path)
     if (raw !== undefined) await this.backup()
-    this.state = raw === undefined ? emptyState(this.initialSettings) : migrate(raw, this.initialSettings)
+    this.state = raw === undefined
+      ? emptyState(this.initialSettings)
+      : looksLikeV1Document(raw)
+        ? migrateV1State(raw, this.initialSettings, this.masterKey)
+        : migrate(raw as State, this.initialSettings)
     this.loaded = true
 
     let generatedPassword: string | undefined
@@ -73,14 +81,14 @@ export class StateStore {
     return this.state.accounts.find(account => account.id === id)
   }
 
+  /** v2 keeps the vendor account id inside `profile`, so the lookup reads that field. */
   findAccountByAccountId(accountId: string): StoredAccount | undefined {
-    return accountId === '' ? undefined : this.state.accounts.find(account => account.accountId === accountId)
+    if (accountId === '') return undefined
+    return this.state.accounts.find(account => stringField(account.profile, 'accountId') === accountId)
   }
 
   upsertAccount(account: StoredAccount): StoredAccount {
-    const index = this.state.accounts.findIndex(existing =>
-      (account.accountId !== '' && existing.accountId === account.accountId)
-      || (account.accountId === '' && existing.id === account.id))
+    const index = this.state.accounts.findIndex(existing => existing.id === account.id)
     if (index === -1) {
       this.state.accounts.push(account)
       this.scheduleSave()
@@ -103,6 +111,20 @@ export class StateStore {
     return next
   }
 
+  /** Merge a patch into an adapter-owned `profile` without interpreting it. */
+  updateProfile(id: string, patch: Record<string, unknown>): StoredAccount | undefined {
+    const index = this.state.accounts.findIndex(account => account.id === id)
+    const existing = this.state.accounts[index]
+    if (index === -1 || existing === undefined) return undefined
+    this.state.accounts[index] = {
+      ...existing,
+      profile: { ...existing.profile, ...patch },
+      updatedAt: Date.now(),
+    }
+    this.scheduleSave()
+    return this.state.accounts[index]
+  }
+
   removeAccount(id: string): boolean {
     const before = this.state.accounts.length
     this.state.accounts = this.state.accounts.filter(account => account.id !== id)
@@ -113,6 +135,47 @@ export class StateStore {
       this.scheduleSave()
     }
     return removed
+  }
+
+  /**
+   * Provider-agnostic runtime bookkeeping. A success clears the cooldown and the last error;
+   * a failure raises an exponential cooldown capped at `MAX_ACCOUNT_COOLDOWN_SECONDS`.
+   * Only shell fields are touched, so this is safe for every adapter.
+   */
+  markUsed(id: string): void {
+    const index = this.state.accounts.findIndex(account => account.id === id)
+    const existing = this.state.accounts[index]
+    if (index === -1 || existing === undefined) return
+    const now = Date.now()
+    this.state.accounts[index] = {
+      ...existing,
+      lastUsedAt: now,
+      lastError: '',
+      successes: existing.successes + 1,
+      cooldownUntil: 0,
+      updatedAt: now,
+    }
+    this.scheduleSave()
+  }
+
+  markFailed(id: string, error: string, baseCooldownSeconds: number): void {
+    const index = this.state.accounts.findIndex(account => account.id === id)
+    const existing = this.state.accounts[index]
+    if (index === -1 || existing === undefined) return
+    const now = Date.now()
+    const failures = existing.failures + 1
+    const cooldown = Math.min(
+      baseCooldownSeconds * 2 ** Math.max(0, failures - 1),
+      MAX_ACCOUNT_COOLDOWN_SECONDS,
+    )
+    this.state.accounts[index] = {
+      ...existing,
+      failures,
+      lastError: truncate(error, 300),
+      cooldownUntil: now + cooldown * 1000,
+      updatedAt: now,
+    }
+    this.scheduleSave()
   }
 
   get apiKeys(): StoredApiKey[] {
@@ -312,8 +375,18 @@ function normalizeProbeRecord(record: ProbeRecord): ProbeRecord {
   }
 }
 
+function looksLikeV1Document(raw: State | V1State): raw is V1State {
+  return raw.schemaVersion === 1
+}
+
+/** Read a string out of an adapter-owned `profile` without interpreting it. */
+function stringField(profile: Record<string, unknown>, key: string): string {
+  const value = profile[key]
+  return typeof value === 'string' ? value : ''
+}
+
 function migrate(raw: State, settings: Settings): State {
-  const state: State = { ...emptyState(settings), ...raw }
+  const state: State = { ...emptyState(settings), ...raw, schemaVersion: 2 }
   state.settings = { ...settings, ...raw.settings }
   state.accounts = Array.isArray(raw.accounts) ? raw.accounts : []
   state.apiKeys = Array.isArray(raw.apiKeys) ? raw.apiKeys : []

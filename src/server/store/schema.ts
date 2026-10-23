@@ -8,20 +8,27 @@ import type {
   Settings,
   Stats,
 } from '../../shared/types.js'
+import type { CredentialKind } from '../../shared/providers.js'
 
+/**
+ * An account record, split into a provider-agnostic shell and a vendor-owned interior.
+ *
+ * The shell carries everything the gateway needs to pick, rotate and cool down an account.
+ * The interior carries everything that is specific to one vendor:
+ *   - `credentialsEnc` — one AES-256-GCM blob whose AAD binds it to `id + providerId`, so a
+ *     ciphertext can never be replayed against another provider. Field names inside are
+ *     adapter-defined.
+ *   - `profile` — non-secret vendor state (points, membership, claim calendar, …). Stored
+ *     verbatim and only ever interpreted by the adapter that owns it.
+ */
 export interface StoredAccount {
   id: string
-  name: string
-  accountId: string
-  uid: string
-  tokenEnc?: SecretBox
-  ssoSessionEnc?: SecretBox
-  modelBearerEnc?: SecretBox
-  mobile: string
-  nickname: string
-  domainAccount: string
-  source: 'sms-login' | 'paste' | 'file-import' | 'model-only'
+  providerId: string
+  label: string
+  credentialKind: CredentialKind
   enabled: boolean
+
+  // ---- provider-agnostic runtime state ----
   sessionOk: boolean
   statusNote: string
   lastError: string
@@ -29,17 +36,16 @@ export interface StoredAccount {
   cooldownUntil: number
   successes: number
   failures: number
-  pointsKnown: boolean
-  pointsBalance: number
-  sparkBalance: number
-  planCode: string
-  planName: string
-  planActive: boolean
-  pendingPopups: number
-  lastCheckedAt: number
-  lastClaimAt: number
   createdAt: number
   updatedAt: number
+
+  // ---- vendor-owned interior ----
+  credentialsEnc: SecretBox
+  profile: Record<string, unknown>
+}
+
+export function emptyProfile(): Record<string, unknown> {
+  return {}
 }
 
 export interface StoredApiKey extends ApiKeyPublic {
@@ -47,11 +53,13 @@ export interface StoredApiKey extends ApiKeyPublic {
 }
 
 export interface State {
-  schemaVersion: 1
+  schemaVersion: 2
   auth: {
     passwordHash: string
     authVersion: number
     passwordGenerated: boolean
+    /** Admin username; empty until M5 registration lands. */
+    adminUser: string
     createdAt: number
   }
   settings: Settings
@@ -90,8 +98,8 @@ export function emptyStats(): Stats {
 
 export function emptyState(settings: Settings): State {
   return {
-    schemaVersion: 1,
-    auth: { passwordHash: '', authVersion: 1, passwordGenerated: false, createdAt: Date.now() },
+    schemaVersion: 2,
+    auth: { passwordHash: '', authVersion: 1, passwordGenerated: false, adminUser: '', createdAt: Date.now() },
     settings,
     accounts: [],
     apiKeys: [],

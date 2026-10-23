@@ -67,3 +67,16 @@ export function open(box: SecretBox | undefined, aad: string, key: Buffer): stri
 export function secretBoxAad(owner: string, field: string): string {
   return `myapi:${owner}:${field}`
 }
+
+/**
+ * AAD for an account's credential blob. Binding the provider id means a ciphertext sealed
+ * for one provider can never be replayed against another, even if both share an account id.
+ */
+export function credentialsAad(accountId: string, providerId: string): string {
+  return `myapi:${accountId}:${providerId}:creds`
+}
+
+/** AAD used by the v1 single-provider schema, kept only so old state can be migrated. */
+export function legacyCredentialAad(accountId: string, field: string): string {
+  return secretBoxAad(accountId, field)
+}

@@ -1,12 +1,49 @@
 import { join } from 'node:path'
-import type { CatalogSnapshot, ModelInfo, ProbeRecord, ProbeResultView, ProbeSummary } from '../../shared/types.js'
-import { ensureDir, readJsonFile, writeFileAtomic } from '../store/atomic.js'
-import type { StateStore } from '../store/state.js'
-import type { StoredAccount } from '../store/schema.js'
-import { logger as rootLogger } from '../logger.js'
-import { truncate } from '../util.js'
+import type { CatalogSnapshot, ModelInfo, ProbeRecord, ProbeResultView, ProbeSummary } from '../../../shared/types.js'
+import type { ModelRecord } from '../../../shared/providers.js'
+import { ensureDir, readJsonFile, writeFileAtomic } from '../../store/atomic.js'
+import type { StateStore } from '../../store/state.js'
+import type { StoredAccount } from '../../store/schema.js'
+import { logger as rootLogger } from '../../logger.js'
+import { truncate } from '../../util.js'
+import { normalizeName } from '../catalog.js'
+import { ASTRO_PROVIDER_ID } from '../ids.js'
 import type { AccountService } from './accounts.js'
 import type { AstronApi, CatalogModel, ModelConfig } from './types.js'
+
+/** Provider-prefixed model names are stripped so myapi never exposes a prefixed name. */
+const KNOWN_PREFIXES = new Set(['astudio', 'astron', 'xfyun', 'xf-yun', 'maas', 'spark'])
+
+function stripProviderPrefix(name: string): string {
+  const slash = name.indexOf('/')
+  if (slash === -1) return name
+  return KNOWN_PREFIXES.has(name.slice(0, slash).trim().toLowerCase()) ? name.slice(slash + 1) : name
+}
+
+/** Map one AStudio catalog entry onto the gateway-owned `ModelRecord` shape. */
+function toModelRecord(model: ModelInfo): ModelRecord {
+  const display = model.name !== '' ? model.name : model.slug
+  return {
+    name: stripProviderPrefix(normalizeName(display)),
+    providerId: ASTRO_PROVIDER_ID,
+    upstreamSlug: model.slug,
+    displayName: display,
+    contextWindow: model.contextWindow,
+    maxOutputTokens: model.maxOutputTokens,
+    reasoningEfforts: [...model.reasoningEfforts],
+    inputModalities: [...model.inputModalities],
+    canDisableThinking: model.canDisableThinking,
+    available: model.available,
+    priority: model.priority,
+    // Everything AStudio-specific stays opaque to the gateway.
+    extra: {
+      directoryId: model.directoryId,
+      pointMultiplier: model.pointMultiplier,
+      pointMultipliers: model.pointMultipliers,
+      source: model.source,
+    },
+  }
+}
 
 /** Efforts the live gateway is known to refuse even though the roster lists them. */
 const REFUSED_EFFORTS: Record<string, readonly string[]> = {
@@ -189,6 +226,37 @@ export class CatalogService {
       .map(([alias]) => alias)
   }
 
+  /**
+   * Expose the merged catalog as gateway `ModelRecord`s, scoped to the given account ids.
+   *
+   * The console still reads `ModelInfo` through `models` / `visibleModels`; this projection is
+   * what an adapter hands the unified catalog. A model with no per-account list is always
+   * included; a model with one is included only when it is available to a requested account.
+   */
+  toModelRecords(accountIds: string[] = []): ModelRecord[] {
+    const scope = new Set(accountIds)
+    return this.snapshot.models
+      .filter(model => {
+        if (scope.size === 0) return true
+        if (model.availableAccountIds.length === 0) return true
+        return model.availableAccountIds.some(id => scope.has(id))
+      })
+      .map(toModelRecord)
+  }
+
+  /** Whether one account can currently serve a model name (slug, display name or directory id). */
+  modelAvailableForAccount(accountId: string, name: string): boolean {
+    const key = normalize(name)
+    if (key === '') return false
+    const model = this.snapshot.models.find(entry =>
+      normalize(entry.slug) === key
+      || normalize(entry.name) === key
+      || normalize(entry.directoryId) === key)
+    if (model === undefined) return false
+    if (model.availableAccountIds.length === 0) return model.available
+    return model.availableAccountIds.includes(accountId)
+  }
+
   probeSummary(slug: string): ProbeSummary {
     const results = this.store.probesFor(slug)
       .map(probeView)
@@ -220,7 +288,7 @@ export class CatalogService {
         const catalog = await this.client.fetchCatalog(session.modelBearerToken)
         models = catalog.map(fromCatalogModel).filter((model): model is ModelInfo => model !== undefined)
       } catch (error: unknown) {
-        errors.push(`catalog[${account.name}]: ${truncate(error instanceof Error ? error.message : String(error), 200)}`)
+        errors.push(`catalog[${account.label}]: ${truncate(error instanceof Error ? error.message : String(error), 200)}`)
       }
     }
     if (session.token !== '' || session.ssoSessionId !== '') {
@@ -228,7 +296,7 @@ export class CatalogService {
         const result = await this.client.fetchModelConfigs(session)
         configs = result.configs
       } catch (error: unknown) {
-        errors.push(`configs[${account.name}]: ${truncate(error instanceof Error ? error.message : String(error), 200)}`)
+        errors.push(`configs[${account.label}]: ${truncate(error instanceof Error ? error.message : String(error), 200)}`)
       }
     }
     return { models, configs, errors }

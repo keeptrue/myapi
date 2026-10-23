@@ -1,9 +1,9 @@
 import {
   CATALOG_MODEL_TOKEN_LIMIT,
   WORKSPACE_RESPONSE_LIMIT,
-} from '../../shared/constants.js'
-import { isRecord, normalizeUid, stringField, numberField, booleanField } from '../util.js'
-import { readLimited } from '../http.js'
+} from '../../../shared/constants.js'
+import { isRecord, normalizeUid, stringField, numberField, booleanField } from '../../util.js'
+import { readLimited } from '../../http.js'
 import { sessionCookie } from './session.js'
 import {
   AstronError,
