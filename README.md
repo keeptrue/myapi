@@ -217,5 +217,5 @@ bun run check          # typecheck + test + build，提交前必跑
 ## 致谢
 
 本项目的控制台视觉与工程骨架沿用作者的另一个项目
-[astudio2api](https://github.com/zhuchunshu/astudio2api)，多提供商账号管理的产品形态参考了
+[astudio2api](https://github.com/keeptrue/astudio2api)，多提供商账号管理的产品形态参考了
 [agent2api](https://github.com/aimod-cc/agent2api)。感谢两者的作者。

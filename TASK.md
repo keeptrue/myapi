@@ -18,7 +18,7 @@
 ## M0 已完成
 
 - 从 `astudio2api` 复制整份代码，剔除 `.git` / `node_modules` / `dist` / `data` / `.env`。
-- `git init` + 远端 `https://github.com/zhuchunshu/myapi.git`，分支 `main`。
+- `git init` + 远端 `https://github.com/keeptrue/myapi.git`，分支 `main`。
 - 全量改名：`ASTUDIO_*` → `MYAPI_*`、`astudio2api` → `myapi`、`AStudio2API` → `myapi`、
   `8777` → `8787`、`x-astudio-csrf` → `x-myapi-csrf`、`astudio-theme` → `myapi-theme`、
   `astudio:unauthorized` → `myapi:unauthorized`、`astudio_panel` → `myapi_panel`、

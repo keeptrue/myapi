@@ -47,5 +47,5 @@ MYAPI_API_KEY=sk-myapi-… node scripts/smoke.mjs
 ## 发布
 
 - tag `v*` 必须与 `package.json` 版本一致；
-- Release 工作流会跑全量 check、推送 `ghcr.io/zhuchunshu/myapi` 镜像并创建 GitHub Release；
+- Release 工作流会跑全量 check、推送 `ghcr.io/keeptrue/myapi` 镜像并创建 GitHub Release；
 - 发版前确认 `data/` 未被提交、README 的版本/端口与实际一致。

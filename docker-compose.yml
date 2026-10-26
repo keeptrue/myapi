@@ -8,7 +8,7 @@
 # 并确保已经设置了强面板密码。
 services:
   myapi:
-    image: ghcr.io/zhuchunshu/myapi:latest
+    image: ghcr.io/keeptrue/myapi:latest
     build:
       context: .
     container_name: myapi

@@ -63,7 +63,7 @@ jobs:
             独立 AStudio 多账号网关：OpenAI Chat Completions / Responses / Anthropic Messages 三协议，Web 控制台、多账号轮换、用量与权益管理。
 
             ```bash
-            docker pull ghcr.io/zhuchunshu/myapi:${{ github.ref_name }}
+            docker pull ghcr.io/keeptrue/myapi:${{ github.ref_name }}
             ```
 
             详见 README 的「快速开始」与「客户端接入」。升级前请备份 `data/`（含账号凭据与主密钥）。

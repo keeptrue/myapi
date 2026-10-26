@@ -217,5 +217,5 @@ wins.
 ## Credits
 
 The console visual language and engineering skeleton come from the author's other project
-[astudio2api](https://github.com/zhuchunshu/astudio2api). The multi-provider account-management
+[astudio2api](https://github.com/keeptrue/astudio2api). The multi-provider account-management
 product shape is informed by [agent2api](https://github.com/aimod-cc/agent2api). Thanks to both.
